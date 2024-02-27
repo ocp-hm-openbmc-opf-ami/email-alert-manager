@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 project(mail-alert-manager CXX)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -22,6 +22,7 @@ pkg_check_modules(SYSTEMD libsystemd REQUIRED)
 # import sdbusplus
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SDBUSPLUSPLUS sdbusplus REQUIRED)
+pkg_get_variable(SYSTEMD_SYSTEM_UNIT_DIR systemd systemdsystemunitdir)
 
 add_executable(mail-alert-manager ${SRC_FILES})
 
@@ -37,5 +38,5 @@ link_directories(${EXTERNAL_INSTALL_LOCATION}/lib)
 set(SERVICE_FILES
     ${PROJECT_SOURCE_DIR}/service_files/mail-alert-manager.service)
 
-install(FILES ${SERVICE_FILES} DESTINATION /lib/systemd/system/)
+install(FILES ${SERVICE_FILES} DESTINATION ${SYSTEMD_SYSTEM_UNIT_DIR})
 install(TARGETS mail-alert-manager DESTINATION bin)
