@@ -1,5 +1,13 @@
 #include "mail_alert_manager.hpp"
 
+#include <arpa/inet.h>
+#include <assert.h>
+#include <netdb.h>
+#include <openssl/ssl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <syslog.h>
 
 #include <fstream>
@@ -11,55 +19,50 @@ namespace alert
 {
 namespace manager
 {
+
 void monitor_cb(const char* buf, int buflen, int writing, void* arg)
 {
+
     if (writing == SMTP_CB_HEADERS)
     {
-        std::cerr << "H: ";
-        std::cerr << buf;
+#if (ENABLE_VERBOSE_DEBUG == 1)
+        std::cerr << "HEADER: " << buf << std::endl;
+#endif
         return;
     }
-
     if (writing)
-        std::cerr << "C: ";
+    {
+#if (ENABLE_VERBOSE_DEBUG == 1)
+        std::cerr << "CTRL: " << buf << std::endl;
+#endif
+    }
     else
-        std::cerr << "S: ";
-
-    std::cerr << buf;
-
-    if (buf[buflen - 1] != '\n')
-        std::cerr << "\n";
+    {
+#if (ENABLE_VERBOSE_DEBUG == 1)
+        std::cerr << "STAT: " << buf << std::endl;
+#endif
+    }
 }
 
-/* Callback to request user/password info.  Not thread safe. */
 int authinteract(auth_client_request_t request, char** result, int fields,
                  void* arg)
 {
-    char prompt[64];
-    static char resp[512];
-    char *p, *rp;
-    int i, n, tty;
+    struct credentials* cread = (struct credentials*)arg;
 
-    rp = resp;
-    for (i = 0; i < fields; i++)
+    if ((!cread->username.empty()) || (!cread->password.empty()))
     {
-        n = snprintf(prompt, sizeof prompt, "%s%s: ", request[i].prompt,
-                     (request[i].flags & AUTH_CLEARTEXT) ? " (not encrypted)"
-                                                         : "");
-        if (request[i].flags & AUTH_PASS)
-            result[i] = getpass(prompt);
-        else
+        return 0;
+    }
+
+    for (int i = 0; i < fields; i++)
+    {
+        if (request[i].flags & AUTH_USER)
         {
-            tty = open("/dev/tty", O_RDWR);
-            write(tty, prompt, n);
-            n = read(tty, rp, sizeof resp - (rp - resp));
-            close(tty);
-            p = rp + n;
-            while (isspace(p[-1]))
-                p--;
-            *p++ = '\0';
-            result[i] = rp;
-            rp = p;
+            result[i] = (char*)cread->username.c_str();
+        }
+        else if (request[i].flags & AUTH_PASS)
+        {
+            result[i] = (char*)cread->password.c_str();
         }
     }
     return 1;
@@ -70,7 +73,7 @@ int tlsinteract(char* buf, int buflen, int rwflag, void* arg)
     char* pw;
     int len;
 
-    pw = getpass("certificate password");
+    pw = buf;
     len = strlen(pw);
     if (len + 1 > buflen)
         return 0;
@@ -165,8 +168,10 @@ int handle_invalid_peer_certificate(long vfy_result)
             k = "X509_V_ERR_CERT_REJECTED";
             break;
     }
-    std::cerr << "SMTP_EV_INVALID_PEER_CERTIFICATE: " << vfy_result << k
-              << "\n";
+#if (ENABLE_VERBOSE_DEBUG == 1)
+    std::cout << "SMTP_EV_INVALID_PEER_CERTIFICATE: " << vfy_result << k
+              << std::endl;
+#endif
     return 1; /* Accept the problem */
 }
 
@@ -178,13 +183,42 @@ void event_cb(smtp_session_t session, int event_no, void* arg, ...)
     va_start(alist, arg);
     switch (event_no)
     {
-        case SMTP_EV_CONNECT:
-        case SMTP_EV_MAILSTATUS:
-        case SMTP_EV_RCPTSTATUS:
-        case SMTP_EV_MESSAGEDATA:
-        case SMTP_EV_MESSAGESENT:
-        case SMTP_EV_DISCONNECT:
+        case SMTP_EV_CONNECT: {
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_CONNECT \r\n");
+#endif
             break;
+        }
+        case SMTP_EV_MAILSTATUS: {
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_MAILSTATUS \r\n");
+#endif
+            break;
+        }
+        case SMTP_EV_RCPTSTATUS: {
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_RCPTSTATUS \r\n");
+#endif
+            break;
+        }
+        case SMTP_EV_MESSAGEDATA: {
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_MESSAGEDATA \r\n");
+#endif
+            break;
+        }
+        case SMTP_EV_MESSAGESENT: {
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_MESSAGESENT \r\n");
+#endif
+            break;
+        }
+        case SMTP_EV_DISCONNECT: {
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_DISCONNECT \r\n");
+#endif
+            break;
+        }
         case SMTP_EV_WEAK_CIPHER: {
             int bits;
             bits = va_arg(alist, long);
@@ -194,7 +228,9 @@ void event_cb(smtp_session_t session, int event_no, void* arg, ...)
             break;
         }
         case SMTP_EV_STARTTLS_OK:
-            puts("SMTP_EV_STARTTLS_OK - TLS started here.");
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_STARTTLS_OK - TLS started here. \r\n");
+#endif
             break;
         case SMTP_EV_INVALID_PEER_CERTIFICATE: {
             long vfy_result;
@@ -205,193 +241,478 @@ void event_cb(smtp_session_t session, int event_no, void* arg, ...)
         }
         case SMTP_EV_NO_PEER_CERTIFICATE: {
             ok = va_arg(alist, int*);
-            puts("SMTP_EV_NO_PEER_CERTIFICATE - accepted.");
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_NO_PEER_CERTIFICATE - accepted. \r\n");
+#endif
             *ok = 1;
             break;
         }
         case SMTP_EV_WRONG_PEER_CERTIFICATE: {
             ok = va_arg(alist, int*);
-            puts("SMTP_EV_WRONG_PEER_CERTIFICATE - accepted.");
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_WRONG_PEER_CERTIFICATE - accepted. \r\n");
+#endif
             *ok = 1;
             break;
         }
         case SMTP_EV_NO_CLIENT_CERTIFICATE: {
             ok = va_arg(alist, int*);
-            puts("SMTP_EV_NO_CLIENT_CERTIFICATE - accepted.");
+#if (ENABLE_VERBOSE_DEBUG == 1)
+            log<level::INFO>("SMTP_EV_NO_CLIENT_CERTIFICATE - accepted. \r\n");
+#endif
             *ok = 1;
             break;
         }
+#if (ENABLE_VERBOSE_DEBUG == 1)
         default:
-            printf("Got event: %d - ignored.\n", event_no);
+            log<level::INFO>("Got event: ",
+                             entry("%d - ignored \r\n", event_no));
+#endif
     }
     va_end(alist);
 }
 
-/* Callback to prnt the recipient status */
 void print_recipient_status(smtp_recipient_t recipient, const char* mailbox,
                             void* arg)
 {
     const smtp_status_t* status;
-
     status = smtp_recipient_status(recipient);
-    std::cerr << mailbox << status->code << status->text;
+#if (ENABLE_VERBOSE_DEBUG == 0)
+    std::cerr << "Recipient Status: " << status->code << " " << status->text
+              << std::endl;
+#endif
 }
 
-uint16_t Smtp::sendmail(const std::string& recipient,
-                        const std::string& subject, const std::string& msg)
+void smtp::init_smtp(void)
 {
+    session = smtp_create_session();
+}
 
-    if ((Smtp::enable == false) || Smtp::host.empty() || (Smtp::port == 0) ||
-        Smtp::sender.empty())
+ipVersion smtp::ip_version(const char* src)
+{
+    struct addrinfo hint, *res = NULL;
+    int ret = 0;
+    ipVersion status = ipVersion::SMTP_IP_ERROR;
+
+    memset(&hint, '\0', sizeof hint);
+
+    hint.ai_family = PF_UNSPEC;
+    hint.ai_flags = AI_NUMERICHOST;
+
+    ret = getaddrinfo(src, NULL, &hint, &res);
+
+    if (ret)
     {
-        return -1;
+        log<level::ERR>("Invalid address");
+        return ipVersion::SMTP_IP_ERROR;
     }
-
-    if (Smtp::enable == false)
+    if (res->ai_family == AF_INET)
     {
-        return -2;
+        status = ipVersion::SMTP_IPV4_MODEL;
     }
-
-    auth_client_init();
-    Smtp::session = smtp_create_session();
-    Smtp::message = smtp_add_message(Smtp::session);
-
-    // smtp_set_monitorcb (session, monitor_cb, stdout, 1);
-
-    // smtp_set_header (message, "Disposition-Notification-To", NULL, NULL);
-
-    // smtp_starttls_enable (session, Starttls_ENABLED);
-    // smtp_starttls_enable (session, Starttls_REQUIRED);
-
-    char* Toch = new char[recipient.length() + 1];
-    strcpy(Toch, recipient.c_str());
-    smtp_set_header(Smtp::message, "To", NULL, Toch);
-    // smtp_set_header (Smtp::message, "Cc", NULL, NULL);
-    // smtp_set_header (Smtp::message, "Bcc", NULL, NULL);
-
-    sa.sa_handler = SIG_IGN;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGPIPE, &sa, NULL);
-
-    std::string smtpPort = std::to_string(Smtp::port);
-
-    char* hostch = new char[host.length() + smtpPort.length() + 2];
-    strcpy(hostch, (host + ":" + smtpPort).c_str());
-    smtp_set_server(Smtp::session, hostch);
-
-    Smtp::authctx = auth_create_context();
-    auth_set_mechanism_flags(Smtp::authctx, AUTH_PLUGIN_PLAIN, 0);
-    auth_set_interact_cb(Smtp::authctx, authinteract, NULL);
-
-    smtp_starttls_set_password_cb(tlsinteract, NULL);
-    smtp_set_eventcb(Smtp::session, event_cb, NULL);
-
-    // if (!noauth)
-    // smtp_auth_set_context (Smtp::session, Smtp::authctx);
-
-    char* fromch = new char[sender.length() + 1];
-    strcpy(fromch, sender.c_str());
-    smtp_set_reverse_path(Smtp::message, fromch);
-
-    char* subch = new char[subject.length() + 1];
-    strcpy(subch, subject.c_str());
-    smtp_set_header(Smtp::message, "Subject", subch);
-    smtp_set_header_option(Smtp::message, "Subject", Hdr_OVERRIDE, 1);
-
-    char* msgch = new char[msg.length() + 5];
-    strcpy(msgch, ("\r\n" + msg + "\r\n").c_str());
-    smtp_set_message_str(Smtp::message, msgch);
-
-    smtp_add_recipient(Smtp::message, Toch);
-
-    /* Recipient options set here */
-    //    if (notify != Notify_NOTSET)
-    //      smtp_dsn_set_notify (recipient, notify);
-    //  }
-
-    if (!smtp_start_session(Smtp::session))
+    else if (res->ai_family == AF_INET6)
     {
-        std::cerr << "SMTP server problem \n";
+        status = ipVersion::SMTP_IPV6_MODEL;
     }
     else
     {
-        Smtp::status = smtp_message_transfer_status(Smtp::message);
-        std::cerr << "SMTP mail status: " << Smtp::status->text << "\n";
-        smtp_enumerate_recipients(message, print_recipient_status, NULL);
+        status = ipVersion::SMTP_IP_ERROR;
+    }
+    freeaddrinfo(res);
+    return status;
+}
+
+uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
+{
+    char service[5] = {0};
+    uint16_t ret = SMTP_SUCCESS;
+    auth_client_init();
+
+    uint8_t cur_smtpCfg = static_cast<int>(curr_server);
+
+    if (clientcfg[cur_smtpCfg].enable == true)
+    {
+        if ((clientcfg[cur_smtpCfg].host.empty()) ||
+            (clientcfg[cur_smtpCfg].port == 0) ||
+            (clientcfg[cur_smtpCfg].sender.empty()))
+        {
+            log<level::ERR>("Host/Port/Sender is empty \r\n");
+            return SMTP_ERROR;
+        }
+
+        credential = clientcfg[cur_smtpCfg].user_credntial;
+
+        if (clientcfg[cur_smtpCfg].AuthEnable == true)
+        {
+            if ((credential.username.empty()) || (credential.password.empty()))
+            {
+                log<level::ERR>(
+                    "Authentication: username/password is empty \r\n");
+                return SMTP_ERROR;
+            }
+        }
+        else
+        {
+            log<level::INFO>("Authentication not enabled \r\n");
+        }
+        message = smtp_add_message(session);
+
+        smtp_set_monitorcb(session, monitor_cb, stdout, 0);
+
+        if (!smtp_set_timeout(session, (int)Timeout_GREETING, 3))
+        {
+            log<level::INFO>("Timeout setting not working \r\n");
+        }
+
+        if (clientcfg[cur_smtpCfg].TLSEnable == true)
+        {
+            log<level::INFO>("TLS is enabled \r\n");
+
+            if ((!server_cert.exists()) || (!private_key.exists()) ||
+                (!CA_cert.exists()))
+            {
+                log<level::ERR>("Please Provide Certificates \r\n");
+                return SMTP_ERROR;
+            }
+            if (!(smtp_starttls_enable(session, Starttls_ENABLED)))
+            {
+                log<level::ERR>("startTLS enable Failed \r\n");
+            }
+            if (!(smtp_starttls_enable(session, Starttls_REQUIRED)))
+            {
+                log<level::ERR>("startTLS Required Failed\r\n");
+            }
+
+            SSL_CTX* smtpcli_sslctx = NULL;
+            smtpcli_sslctx = SSL_CTX_new(SSLv23_method());
+
+            if (!smtpcli_sslctx)
+            {
+                log<level::ERR>("Error creating SSL context\r\n");
+                return SMTP_ERROR;
+            }
+            /* Load private key */
+            if (SSL_CTX_use_PrivateKey_file(smtpcli_sslctx, privatekeyPath,
+                                            SSL_FILETYPE_PEM) != 1)
+            {
+                log<level::ERR>("Cannot load key file \r\n");
+            }
+
+            /* Load certificate chain */
+            if (SSL_CTX_use_certificate_chain_file(smtpcli_sslctx,
+                                                   certificatePath) != 1)
+            {
+                log<level::ERR>("Cannot load certificate file \r\n");
+            }
+
+            /* Check private key validity */
+            if (!SSL_CTX_check_private_key(smtpcli_sslctx))
+            {
+                log<level::ERR>("Private Key is invalid \r\n");
+            }
+
+            /* Load trust file */
+            if (SSL_CTX_load_verify_locations(smtpcli_sslctx, CAcertificatePath,
+                                              NULL) != 1)
+            {
+                log<level::ERR>("Cannot load trust file \r\n");
+            }
+
+            /* If any of the above conditions failed, free the SSL_CTX and */
+            if (!smtpcli_sslctx)
+            {
+                SSL_CTX_free(smtpcli_sslctx);
+                smtpcli_sslctx = NULL;
+                return SMTP_ERROR;
+            }
+            SSL_CTX_set_verify(smtpcli_sslctx, SSL_VERIFY_PEER, NULL);
+            SSL_CTX_set_verify_depth(smtpcli_sslctx, 4);
+            SSL_CTX_free(smtpcli_sslctx);
+        }
+        else
+        {
+            log<level::INFO>("TLS is Disabled \r\n");
+            smtp_starttls_enable(session, Starttls_DISABLED);
+        }
+
+        for (const auto& single_recipient : clientcfg[cur_smtpCfg].recipient)
+        {
+            smtp_set_header(message, "To", NULL, single_recipient.c_str());
+            smtp_add_recipient(message, single_recipient.c_str());
+        }
+
+        sa.sa_handler = SIG_IGN;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGPIPE, &sa, NULL);
+
+        if ((ip_version(clientcfg[cur_smtpCfg].host.c_str()) ==
+             ipVersion::SMTP_IPV4_MODEL))
+        {
+            std::string smtpPort = clientcfg[cur_smtpCfg].host + ":" +
+                                   std::to_string(clientcfg[cur_smtpCfg].port);
+
+            if (smtp_set_server(session, (const char*)smtpPort.c_str()) == 0)
+            {
+                log<level::ERR>("Server not available: Could not establish "
+                                "connection \r\n");
+                return SMTP_ERROR;
+            }
+
+            log<level::ERR>("IPV4 Model IP adderss  \r\n");
+        }
+        else if (ip_version(clientcfg[cur_smtpCfg].host.c_str()) ==
+                 ipVersion::SMTP_IPV6_MODEL)
+        {
+            char* ip = (char*)clientcfg[cur_smtpCfg].host.c_str();
+            int port = clientcfg[cur_smtpCfg].port;
+            snprintf(service, sizeof(service), "%d", port);
+            smtp_set_ipv6_server(session, (const char*)service,
+                                 (const char*)ip);
+            log<level::ERR>("IPV6 Model IP adderss  \r\n");
+        }
+        else
+        {
+            log<level::ERR>("Provide proper IP adderss  \r\n");
+            return SMTP_ERROR;
+        }
+
+        smtp_set_eventcb(session, event_cb, session);
+
+        if (clientcfg[cur_smtpCfg].AuthEnable == true)
+        {
+            authctx = auth_create_context();
+            if (authctx != NULL)
+            {
+                auth_set_mechanism_flags(authctx, AUTH_PLUGIN_PLAIN, 0);
+                auth_set_interact_cb(authctx, authinteract, (void*)&credential);
+                smtp_auth_set_context(session, authctx);
+            }
+            log<level::INFO>("Auth Enabled\r\n");
+        }
+        else
+        {
+            smtp_auth_set_context(session, NULL);
+            log<level::INFO>("Auth Disabled\r\n");
+        }
+
+        if (!smtp_set_reverse_path(message,
+                                   clientcfg[cur_smtpCfg].sender.c_str()))
+        {
+            log<level::ERR>("Set reverse path: Failed\r\n");
+            return SMTP_ERROR;
+        }
+        if (!smtp_set_header(message, "Subject", subject.c_str()))
+        {
+            log<level::ERR>("Set header: Failed to set subject\r\n");
+            return SMTP_ERROR;
+        }
+        if (!smtp_set_header_option(message, "Subject", Hdr_OVERRIDE, 1))
+        {
+            log<level::ERR>("Set header: Failed to set message\r\n");
+            return SMTP_ERROR;
+        }
+
+        std::string smtp_msg = "\r\n" + msg + "\r\n";
+        smtp_set_message_str(message, (void*)smtp_msg.c_str());
+        log<level::INFO>("Starting Session \r\n");
+
+        if (!smtp_start_session(session))
+        {
+            if (clientcfg[cur_smtpCfg].AuthEnable == true)
+            {
+                auth_destroy_context(authctx);
+            }
+            auth_client_exit();
+            if (curr_server == currentServer::SMTP_PRIMARY_SERVER)
+            {
+                log<level::INFO>("SMTP primary server problem Switching to "
+                                 "Secondary Server \r\n");
+                curr_server = currentServer::SMTP_SECONDARY_SERVER;
+                return sendmail(subject, msg);
+            }
+            else
+            {
+                log<level::INFO>("SMTP Server Problem, Making Primary server "
+                                 "as default \r\n");
+                return SMTP_ERROR;
+            }
+        }
+        else
+        {
+            status = smtp_message_transfer_status(message);
+            smtp_enumerate_recipients(message, print_recipient_status, NULL);
+        }
+        if (clientcfg[cur_smtpCfg].AuthEnable == true)
+        {
+            auth_destroy_context(authctx);
+        }
+        auth_client_exit();
+    }
+    else
+    {
+        log<level::INFO>(
+            "Please make Enable property to true to send the mail \r\n");
+        return SMTP_ERROR;
     }
 
-    smtp_destroy_session(Smtp::session);
-    auth_destroy_context(Smtp::authctx);
-    auth_client_exit();
-    return 0;
+    return ret;
 }
 
-std::tuple<bool, std::string, uint16_t, std::string> Smtp::getsmtpconfig()
+uint16_t smtp::setsmtpconfig(struct mail_server& servers,
+                             currentServer select_server)
 {
-
-    std::tuple<bool, std::string, uint16_t, std::string> smtpcfg;
-    smtpcfg = make_tuple(Smtp::enable, Smtp::host, Smtp::port, Smtp::sender);
-    return smtpcfg;
-}
-
-uint16_t Smtp::setsmtpconfig(const bool enable, const std::string& host,
-                             const uint16_t& port, const std::string& sender)
-{
-
     std::ofstream configFile;
-    configFile.open(configFilePath, std::ios::out | std::ios::trunc);
+    if (select_server == currentServer::SMTP_PRIMARY_SERVER)
+    {
+        configFile.open(primaryconfigFilePath, std::ios::out | std::ios::trunc);
+    }
+    else
+    {
+        configFile.open(secondaryconfigFilePath,
+                        std::ios::out | std::ios::trunc);
+    }
 
     Json privData, jsonData;
-    privData["Enabled"] = enable;
-    privData["Host"] = host;
-    privData["Port"] = port;
-    privData["Sender"] = sender;
-
+    privData["Enabled"] = servers.enable;
+    privData["Host"] = servers.host;
+    privData["Port"] = servers.port;
+    privData["Sender"] = servers.sender;
+    privData["Recipient"] = servers.recipient;
+    privData["TLSEnable"] = servers.TLSEnable;
+    privData["Authentication"] = servers.AuthEnable;
+    privData["username"] = servers.user_credntial.username;
+    privData["password"] = servers.user_credntial.password;
     jsonData["Config"] = privData;
 
     const auto& writeData = jsonData.dump(4);
     configFile << writeData << std::endl;
-
-    // close the opened file.
     configFile.close();
 
-    Smtp::enable = enable;
-    Smtp::host = host;
-    Smtp::port = port;
-    Smtp::sender = sender;
-
-    return 0;
+    int index = static_cast<int>(select_server);
+    clientcfg[index] = servers;
+    log<level::INFO>("Configuration updated on: ", entry("%d server", index));
+    return SMTP_SUCCESS;
 }
 
-int Smtp::initializeSmtpcfg()
+uint16_t smtp::getSmtpConfig(struct mail_server& ms,
+                             currentServer server_select)
 {
+    std::string configFilePath;
+
+    if (server_select == currentServer::SMTP_PRIMARY_SERVER)
+    {
+        configFilePath = primaryconfigFilePath;
+    }
+    else
+    {
+        configFilePath = secondaryconfigFilePath;
+    }
     std::ifstream configFile(configFilePath);
     if (!configFile.is_open())
     {
-        std::cerr << "initializeSmtpcfg: Cannot open config path";
-        return -1;
+        log<level::ERR>("initializeSmtpcfg: Cannot open config path:  \r\n");
+        return SMTP_ERROR;
     }
     try
     {
-        auto data = nlohmann::json::parse(configFile, nullptr);
+        auto data = nlohmann::json::parse(configFile, nullptr, false, true);
+
         Json smtpConfig = data["Config"];
-        Smtp::enable = smtpConfig["Enabled"];
-        Smtp::host = smtpConfig["Host"];
-        Smtp::port = smtpConfig["Port"];
-        Smtp::sender = smtpConfig["Sender"];
+        ms.enable = smtpConfig["Enabled"].get<bool>();
+        ms.host = smtpConfig["Host"];
+        ms.port = smtpConfig["Port"].get<int>();
+        ms.sender = smtpConfig["Sender"];
+        ms.recipient = smtpConfig["Recipient"];
+        ms.TLSEnable = smtpConfig["TLSEnable"].get<bool>();
+        ms.AuthEnable = smtpConfig["Authentication"].get<bool>();
+        ms.user_credntial.username = smtpConfig["username"];
+        ms.user_credntial.password = smtpConfig["password"];
+
+        if ((ms.user_credntial.username.empty()) ||
+            (ms.user_credntial.username.empty()))
+        {
+            return SMTP_ERROR;
+        }
     }
     catch (nlohmann::json::exception& e)
     {
-        std::cerr << "initializeSmtpcfg: Error parsing config file";
-        return -1;
+        log<level::ERR>("Get-config: Error parsing config file \r\n");
+        return SMTP_ERROR;
     }
     catch (std::out_of_range& e)
     {
-        std::cerr << "initializeChannelsSmtpcfg: Error invalid type";
-        return -1;
+        log<level::ERR>("Get-config: Error invalid type \r\n");
+        return SMTP_ERROR;
     }
-    return 0;
+    return 1;
+}
+
+int smtp::initializeSmtpcfg(currentServer curr_server)
+{
+    uint8_t cur_smtpCfg = static_cast<uint8_t>(curr_server);
+    std::string configFilePath;
+
+    if (curr_server == currentServer::SMTP_PRIMARY_SERVER)
+    {
+        configFilePath = primaryconfigFilePath;
+        log<level::INFO>("Server is primary ",
+                         entry("%s \r\n", configFilePath.c_str()));
+    }
+    else
+    {
+        configFilePath = secondaryconfigFilePath;
+        log<level::INFO>("Server is Secondary",
+                         entry("%s \r\n", configFilePath.c_str()));
+    }
+
+    std::ifstream configFile(configFilePath);
+
+    if (!configFile.is_open())
+    {
+        log<level::ERR>("initializeSmtpcfg: Cannot open config path \r\n");
+        return SMTP_ERROR;
+    }
+    try
+    {
+        auto data = nlohmann::json::parse(configFile, nullptr, false, true);
+        Json smtpConfig = data["Config"];
+
+        clientcfg[cur_smtpCfg].enable = smtpConfig["Enabled"].get<bool>();
+        clientcfg[cur_smtpCfg].host = smtpConfig["Host"];
+        clientcfg[cur_smtpCfg].port = smtpConfig["Port"].get<int>();
+        clientcfg[cur_smtpCfg].sender = smtpConfig["Sender"];
+        clientcfg[cur_smtpCfg].recipient = smtpConfig["Recipient"];
+        clientcfg[cur_smtpCfg].TLSEnable = smtpConfig["TLSEnable"].get<bool>();
+        clientcfg[cur_smtpCfg].AuthEnable =
+            smtpConfig["Authentication"].get<bool>();
+        clientcfg[cur_smtpCfg].user_credntial.username = smtpConfig["username"];
+        clientcfg[cur_smtpCfg].user_credntial.password = smtpConfig["password"];
+
+        if ((!clientcfg[cur_smtpCfg].user_credntial.username.empty()) ||
+            (!clientcfg[cur_smtpCfg].user_credntial.password.empty()))
+        {
+            credential.username =
+                clientcfg[cur_smtpCfg].user_credntial.username;
+            credential.password =
+                clientcfg[cur_smtpCfg].user_credntial.password;
+        }
+        else
+        {
+            return SMTP_ERROR;
+        }
+    }
+    catch (nlohmann::json::exception& e)
+    {
+        log<level::ERR>("initializeSmtpcfg: Error parsing config file \r\n");
+        return SMTP_ERROR;
+    }
+    catch (std::out_of_range& e)
+    {
+        log<level::ERR>("initializeChannelsSmtpcfg: Error invalid type \r\n");
+        return SMTP_ERROR;
+    }
+    return SMTP_SUCCESS;
 }
 
 } // namespace manager
