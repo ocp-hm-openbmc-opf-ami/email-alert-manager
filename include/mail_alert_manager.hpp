@@ -25,36 +25,35 @@
 #include <xyz/openbmc_project/Logging/SEL/error.hpp>
 
 #define ENABLE_VERBOSE_DEBUG (0)
+constexpr const uint8_t SMTP_TOTAL_SERVERS = 2;
+
+enum class smtpStatus : int16_t
+{
+    SMTP_ERROR   = -1,
+    SMTP_SUCCESS = 0,
+    DBUS_SUCCESS = 1,
+};
 
 constexpr const char* primaryconfigFilePath =
     "/var/lib/alert/primary_smtp_config.json";
 constexpr const char* secondaryconfigFilePath =
     "/var/lib/alert/secondary_smtp_config.json";
-constexpr const char* certificatePath = "/etc/ssl/certs/server.crt";
-constexpr const char* privatekeyPath = "/etc/ssl/private/server.key";
-constexpr const char* CAcertificatePath = "/etc/ssl/certs/cacert.pem";
-
-constexpr const int totalSmtpServers = 2;
-constexpr const uint16_t SMTP_ERROR = -1;
-constexpr const uint16_t SMTP_SUCCESS = 0;
-constexpr const uint16_t DBUS_SUCCESS = 1;
+constexpr const char* certificatePath[SMTP_TOTAL_SERVERS] = 
+    {"/etc/ssl/certs/primary_server.crt", "/etc/ssl/certs/secondary_server.crt"};
+constexpr const char* privatekeyPath[SMTP_TOTAL_SERVERS] = 
+    {"/etc/ssl/private/primary_server.key" , "/etc/ssl/private/secondary_server.key"};
+constexpr const char* CAcertificatePath[SMTP_TOTAL_SERVERS] = 
+    {"/etc/ssl/certs/primary_cacert.pem" , "/etc/ssl/certs/secondary_cacert.pem"};
 
 using ::phosphor::logging::entry;
 using ::phosphor::logging::level;
 using ::phosphor::logging::log;
 
+
 enum class currentServer
 {
     SMTP_PRIMARY_SERVER = 0,
     SMTP_SECONDARY_SERVER,
-};
-
-enum class ipVersion
-{
-    SMTP_IP_ERROR = 0,
-    SMTP_IPV4_MODEL = 4,
-    SMTP_IPV6_MODEL = 6,
-    SMTP_DNS_MODEL,
 };
 
 namespace mail
@@ -71,6 +70,7 @@ struct credentials
     std::string password;
 };
 
+#pragma pack (1)
 struct mail_server
 {
     bool enable;
@@ -82,6 +82,7 @@ struct mail_server
     std::vector<std::string> recipient;
     struct credentials user_credntial;
 };
+#pragma pack (0)
 
 class smtp
 {
@@ -94,20 +95,25 @@ class smtp
     enum notify_flags notify = Notify_NOTSET;
     struct credentials credential;
     struct sigaction sa;
-    struct mail_server clientcfg[totalSmtpServers];
+    struct mail_server clientcfg[SMTP_TOTAL_SERVERS];
     const smtp_status_t* status;
+    uint8_t cur_smtpCfg = 0;
 
-    std::filesystem::directory_entry server_cert{certificatePath};
-    std::filesystem::directory_entry private_key{privatekeyPath};
-    std::filesystem::directory_entry CA_cert{CAcertificatePath};
+    std::filesystem::directory_entry pri_server_cert{certificatePath[0]};
+    std::filesystem::directory_entry pri_private_key{privatekeyPath[0]};
+    std::filesystem::directory_entry pri_CA_cert{CAcertificatePath[0]};
+
+    std::filesystem::directory_entry sec_server_cert{certificatePath[1]};
+    std::filesystem::directory_entry sec_private_key{privatekeyPath[1]};
+    std::filesystem::directory_entry sec_CA_cert{CAcertificatePath[1]};
 
     void init_smtp(void);
-    ipVersion ip_version(const char* src);
-    uint16_t setsmtpconfig(struct mail_server& servers,
+    smtpStatus setsmtpconfig(struct mail_server& servers,
                            currentServer select_server);
-    uint16_t getSmtpConfig(struct mail_server& ms, currentServer server_select);
+    smtpStatus getSmtpConfig(struct mail_server& ms, currentServer server_select);
     uint16_t sendmail(const std::string& subject, const std::string& msg);
-    int initializeSmtpcfg(currentServer curr_server);
+    smtpStatus initializeSmtpcfg(currentServer curr_server);
+    smtpStatus send_mail(const std::string& subject, const std::string& msg, currentServer server);
 };
 } // namespace manager
 } // namespace alert

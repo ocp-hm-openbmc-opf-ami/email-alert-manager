@@ -2,16 +2,17 @@
 
 #include <arpa/inet.h>
 #include <assert.h>
-#include <netdb.h>
 #include <openssl/ssl.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <syslog.h>
-
 #include <fstream>
 #include <iostream>
+
+#include <sys/socket.h>
+#include <netdb.h>
+#include <sys/types.h>
+
 
 namespace mail
 {
@@ -19,7 +20,6 @@ namespace alert
 {
 namespace manager
 {
-
 void monitor_cb(const char* buf, int buflen, int writing, void* arg)
 {
 
@@ -288,48 +288,44 @@ void smtp::init_smtp(void)
     session = smtp_create_session();
 }
 
-ipVersion smtp::ip_version(const char* src)
+uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
 {
-    struct addrinfo hint, *res = NULL;
-    int ret = 0;
-    ipVersion status = ipVersion::SMTP_IP_ERROR;
+    smtpStatus ret_status = send_mail(subject, msg, curr_server);
 
-    memset(&hint, '\0', sizeof hint);
-
-    hint.ai_family = PF_UNSPEC;
-    hint.ai_flags = AI_NUMERICHOST;
-
-    ret = getaddrinfo(src, NULL, &hint, &res);
-
-    if (ret)
+    if(ret_status != smtpStatus::SMTP_ERROR)
     {
-        log<level::ERR>("Invalid address");
-        return ipVersion::SMTP_IP_ERROR;
-    }
-    if (res->ai_family == AF_INET)
-    {
-        status = ipVersion::SMTP_IPV4_MODEL;
-    }
-    else if (res->ai_family == AF_INET6)
-    {
-        status = ipVersion::SMTP_IPV6_MODEL;
+        log<level::INFO>("SMTP Mail sent.......\r\n");
     }
     else
     {
-        status = ipVersion::SMTP_IP_ERROR;
+        if(curr_server == currentServer::SMTP_PRIMARY_SERVER)
+           curr_server = currentServer::SMTP_SECONDARY_SERVER;
+        else
+           curr_server = currentServer::SMTP_PRIMARY_SERVER;
+
+        if(send_mail(subject, msg, curr_server) == smtpStatus::SMTP_ERROR)
+        {
+            return int(smtpStatus::SMTP_ERROR);
+        }
+        else
+        {
+            return int(smtpStatus::SMTP_SUCCESS);
+        }
     }
-    freeaddrinfo(res);
-    return status;
+    return static_cast<int>(ret_status);
 }
 
-uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
+smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, currentServer server)
 {
     char service[5] = {0};
-    uint16_t ret = SMTP_SUCCESS;
+    smtpStatus ret = smtpStatus::SMTP_SUCCESS;
+
     auth_client_init();
 
-    uint8_t cur_smtpCfg = static_cast<int>(curr_server);
+    session = smtp_create_session();
 
+    uint8_t cur_smtpCfg = int(server);
+   
     if (clientcfg[cur_smtpCfg].enable == true)
     {
         if ((clientcfg[cur_smtpCfg].host.empty()) ||
@@ -337,7 +333,7 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
             (clientcfg[cur_smtpCfg].sender.empty()))
         {
             log<level::ERR>("Host/Port/Sender is empty \r\n");
-            return SMTP_ERROR;
+            return smtpStatus::SMTP_ERROR;
         }
 
         credential = clientcfg[cur_smtpCfg].user_credntial;
@@ -348,12 +344,12 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
             {
                 log<level::ERR>(
                     "Authentication: username/password is empty \r\n");
-                return SMTP_ERROR;
+                return smtpStatus::SMTP_ERROR;
             }
         }
         else
         {
-            log<level::INFO>("Authentication not enabled \r\n");
+           log<level::INFO>("Authentication not enabled \r\n");
         }
         message = smtp_add_message(session);
 
@@ -368,12 +364,24 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
         {
             log<level::INFO>("TLS is enabled \r\n");
 
-            if ((!server_cert.exists()) || (!private_key.exists()) ||
-                (!CA_cert.exists()))
+            if(cur_smtpCfg == 0)
             {
-                log<level::ERR>("Please Provide Certificates \r\n");
-                return SMTP_ERROR;
+                if ((!pri_server_cert.exists()) || (!pri_private_key.exists()) ||
+                    (!pri_CA_cert.exists()))
+                {
+                    log<level::ERR>("Please Provide Certificates \r\n");
+                    return smtpStatus::SMTP_ERROR;
+                }
+            }   
+            else
+            {   if ((!sec_server_cert.exists()) || (!sec_private_key.exists()) ||
+                (!sec_CA_cert.exists()))
+                {
+                    log<level::ERR>("Please Provide Certificates \r\n");
+                    return smtpStatus::SMTP_ERROR;
+                }
             }
+
             if (!(smtp_starttls_enable(session, Starttls_ENABLED)))
             {
                 log<level::ERR>("startTLS enable Failed \r\n");
@@ -389,10 +397,15 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
             if (!smtpcli_sslctx)
             {
                 log<level::ERR>("Error creating SSL context\r\n");
-                return SMTP_ERROR;
+                return smtpStatus::SMTP_ERROR;
             }
+
+            const char *private_key_Cert = privatekeyPath[cur_smtpCfg];
+            const char *Cert_Certificate = certificatePath[cur_smtpCfg];
+            const char *CA_Certificate = CAcertificatePath[cur_smtpCfg];
+
             /* Load private key */
-            if (SSL_CTX_use_PrivateKey_file(smtpcli_sslctx, privatekeyPath,
+            if (SSL_CTX_use_PrivateKey_file(smtpcli_sslctx, private_key_Cert,
                                             SSL_FILETYPE_PEM) != 1)
             {
                 log<level::ERR>("Cannot load key file \r\n");
@@ -400,7 +413,7 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
 
             /* Load certificate chain */
             if (SSL_CTX_use_certificate_chain_file(smtpcli_sslctx,
-                                                   certificatePath) != 1)
+                                                   Cert_Certificate) != 1)
             {
                 log<level::ERR>("Cannot load certificate file \r\n");
             }
@@ -412,7 +425,7 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
             }
 
             /* Load trust file */
-            if (SSL_CTX_load_verify_locations(smtpcli_sslctx, CAcertificatePath,
+            if (SSL_CTX_load_verify_locations(smtpcli_sslctx, CA_Certificate,
                                               NULL) != 1)
             {
                 log<level::ERR>("Cannot load trust file \r\n");
@@ -423,7 +436,7 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
             {
                 SSL_CTX_free(smtpcli_sslctx);
                 smtpcli_sslctx = NULL;
-                return SMTP_ERROR;
+                return smtpStatus::SMTP_ERROR;
             }
             SSL_CTX_set_verify(smtpcli_sslctx, SSL_VERIFY_PEER, NULL);
             SSL_CTX_set_verify_depth(smtpcli_sslctx, 4);
@@ -446,35 +459,14 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
         sa.sa_flags = 0;
         sigaction(SIGPIPE, &sa, NULL);
 
-        if ((ip_version(clientcfg[cur_smtpCfg].host.c_str()) ==
-             ipVersion::SMTP_IPV4_MODEL))
-        {
-            std::string smtpPort = clientcfg[cur_smtpCfg].host + ":" +
-                                   std::to_string(clientcfg[cur_smtpCfg].port);
+        std::string smtpPort = clientcfg[cur_smtpCfg].host + "-" +
+                                std::to_string(clientcfg[cur_smtpCfg].port);
 
-            if (smtp_set_server(session, (const char*)smtpPort.c_str()) == 0)
-            {
-                log<level::ERR>("Server not available: Could not establish "
-                                "connection \r\n");
-                return SMTP_ERROR;
-            }
-
-            log<level::ERR>("IPV4 Model IP adderss  \r\n");
-        }
-        else if (ip_version(clientcfg[cur_smtpCfg].host.c_str()) ==
-                 ipVersion::SMTP_IPV6_MODEL)
+        if (smtp_set_server(session, (const char*)smtpPort.c_str()) == 0)
         {
-            char* ip = (char*)clientcfg[cur_smtpCfg].host.c_str();
-            int port = clientcfg[cur_smtpCfg].port;
-            snprintf(service, sizeof(service), "%d", port);
-            smtp_set_ipv6_server(session, (const char*)service,
-                                 (const char*)ip);
-            log<level::ERR>("IPV6 Model IP adderss  \r\n");
-        }
-        else
-        {
-            log<level::ERR>("Provide proper IP adderss  \r\n");
-            return SMTP_ERROR;
+            log<level::ERR>("Server not available: Could not establish "
+                            "connection \r\n");
+            return smtpStatus::SMTP_ERROR;
         }
 
         smtp_set_eventcb(session, event_cb, session);
@@ -500,66 +492,46 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
                                    clientcfg[cur_smtpCfg].sender.c_str()))
         {
             log<level::ERR>("Set reverse path: Failed\r\n");
-            return SMTP_ERROR;
+            return smtpStatus::SMTP_ERROR;
         }
         if (!smtp_set_header(message, "Subject", subject.c_str()))
         {
             log<level::ERR>("Set header: Failed to set subject\r\n");
-            return SMTP_ERROR;
+            return smtpStatus::SMTP_ERROR;
         }
         if (!smtp_set_header_option(message, "Subject", Hdr_OVERRIDE, 1))
         {
             log<level::ERR>("Set header: Failed to set message\r\n");
-            return SMTP_ERROR;
+            return smtpStatus::SMTP_ERROR;
         }
 
         std::string smtp_msg = "\r\n" + msg + "\r\n";
         smtp_set_message_str(message, (void*)smtp_msg.c_str());
-        log<level::INFO>("Starting Session \r\n");
+
+        syslog(LOG_INFO, "Session Starting %d \r\n", cur_smtpCfg);
 
         if (!smtp_start_session(session))
-        {
-            if (clientcfg[cur_smtpCfg].AuthEnable == true)
-            {
-                auth_destroy_context(authctx);
-            }
-            auth_client_exit();
-            if (curr_server == currentServer::SMTP_PRIMARY_SERVER)
-            {
-                log<level::INFO>("SMTP primary server problem Switching to "
-                                 "Secondary Server \r\n");
-                curr_server = currentServer::SMTP_SECONDARY_SERVER;
-                return sendmail(subject, msg);
-            }
-            else
-            {
-                log<level::INFO>("SMTP Server Problem, Making Primary server "
-                                 "as default \r\n");
-                return SMTP_ERROR;
-            }
+        {         
+            ret = smtpStatus::SMTP_ERROR;               
         }
         else
         {
             status = smtp_message_transfer_status(message);
             smtp_enumerate_recipients(message, print_recipient_status, NULL);
         }
-        if (clientcfg[cur_smtpCfg].AuthEnable == true)
-        {
-            auth_destroy_context(authctx);
-        }
-        auth_client_exit();
     }
     else
     {
         log<level::INFO>(
             "Please make Enable property to true to send the mail \r\n");
-        return SMTP_ERROR;
+        return smtpStatus::SMTP_ERROR;
     }
+    auth_client_exit();
 
     return ret;
 }
 
-uint16_t smtp::setsmtpconfig(struct mail_server& servers,
+smtpStatus smtp::setsmtpconfig(struct mail_server& servers,
                              currentServer select_server)
 {
     std::ofstream configFile;
@@ -592,10 +564,10 @@ uint16_t smtp::setsmtpconfig(struct mail_server& servers,
     int index = static_cast<int>(select_server);
     clientcfg[index] = servers;
     log<level::INFO>("Configuration updated on: ", entry("%d server", index));
-    return SMTP_SUCCESS;
+    return smtpStatus::SMTP_SUCCESS;
 }
 
-uint16_t smtp::getSmtpConfig(struct mail_server& ms,
+smtpStatus smtp::getSmtpConfig(struct mail_server& ms,
                              currentServer server_select)
 {
     std::string configFilePath;
@@ -612,7 +584,7 @@ uint16_t smtp::getSmtpConfig(struct mail_server& ms,
     if (!configFile.is_open())
     {
         log<level::ERR>("initializeSmtpcfg: Cannot open config path:  \r\n");
-        return SMTP_ERROR;
+        return smtpStatus::SMTP_ERROR;
     }
     try
     {
@@ -632,23 +604,23 @@ uint16_t smtp::getSmtpConfig(struct mail_server& ms,
         if ((ms.user_credntial.username.empty()) ||
             (ms.user_credntial.username.empty()))
         {
-            return SMTP_ERROR;
+            return smtpStatus::SMTP_ERROR;
         }
     }
     catch (nlohmann::json::exception& e)
     {
         log<level::ERR>("Get-config: Error parsing config file \r\n");
-        return SMTP_ERROR;
+        return smtpStatus::SMTP_ERROR;
     }
     catch (std::out_of_range& e)
     {
         log<level::ERR>("Get-config: Error invalid type \r\n");
-        return SMTP_ERROR;
+        return smtpStatus::SMTP_ERROR;
     }
-    return 1;
+    return smtpStatus::DBUS_SUCCESS;
 }
 
-int smtp::initializeSmtpcfg(currentServer curr_server)
+smtpStatus smtp::initializeSmtpcfg(currentServer curr_server)
 {
     uint8_t cur_smtpCfg = static_cast<uint8_t>(curr_server);
     std::string configFilePath;
@@ -671,7 +643,7 @@ int smtp::initializeSmtpcfg(currentServer curr_server)
     if (!configFile.is_open())
     {
         log<level::ERR>("initializeSmtpcfg: Cannot open config path \r\n");
-        return SMTP_ERROR;
+        return smtpStatus::SMTP_ERROR;
     }
     try
     {
@@ -699,20 +671,20 @@ int smtp::initializeSmtpcfg(currentServer curr_server)
         }
         else
         {
-            return SMTP_ERROR;
+            return smtpStatus::SMTP_ERROR;
         }
     }
     catch (nlohmann::json::exception& e)
     {
         log<level::ERR>("initializeSmtpcfg: Error parsing config file \r\n");
-        return SMTP_ERROR;
+        return smtpStatus::SMTP_ERROR;
     }
     catch (std::out_of_range& e)
     {
         log<level::ERR>("initializeChannelsSmtpcfg: Error invalid type \r\n");
-        return SMTP_ERROR;
+        return smtpStatus::SMTP_ERROR;
     }
-    return SMTP_SUCCESS;
+    return smtpStatus::SMTP_SUCCESS;
 }
 
 } // namespace manager

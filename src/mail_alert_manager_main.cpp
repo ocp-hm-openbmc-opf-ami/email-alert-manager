@@ -20,7 +20,7 @@ static constexpr const char* smtp_Intf_primary_server =
 static constexpr const char* smtp_Intf_secondary_server =
     "xyz.openbmc_project.mail.alert.secondary";
 
-mail::alert::manager::mail_server smtpClientcfg[2];
+mail::alert::manager::mail_server smtpClientcfg[SMTP_TOTAL_SERVERS];
 mail::alert::manager::smtp objsmtp;
 
 void createDbus_Properties(
@@ -49,7 +49,7 @@ void createDbus_Properties(
             objsmtp.setsmtpconfig(smtpClientcfg[smtpServer],
                                   static_cast<currentServer>(smtpServer));
             resp = requested;
-            return DBUS_SUCCESS;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
         });
 
     smtpIface_primary->register_property(
@@ -73,7 +73,7 @@ void createDbus_Properties(
                                   static_cast<currentServer>(smtpServer));
 
             resp = requested;
-            return DBUS_SUCCESS;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
         });
 
     smtpIface_primary->register_property(
@@ -97,7 +97,7 @@ void createDbus_Properties(
                                   static_cast<currentServer>(smtpServer));
 
             resp = requested;
-            return DBUS_SUCCESS;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
         });
 
     smtpIface_primary->register_property(
@@ -120,7 +120,7 @@ void createDbus_Properties(
             objsmtp.setsmtpconfig(smtpClientcfg[smtpServer],
                                   static_cast<currentServer>(smtpServer));
             resp = requested;
-            return DBUS_SUCCESS;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
         });
 
     smtpIface_primary->register_property(
@@ -143,7 +143,7 @@ void createDbus_Properties(
             objsmtp.setsmtpconfig(smtpClientcfg[smtpServer],
                                   static_cast<currentServer>(smtpServer));
             resp = requested;
-            return DBUS_SUCCESS;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
         });
 
     smtpIface_primary->register_property(
@@ -190,7 +190,7 @@ void createDbus_Properties(
                                   static_cast<currentServer>(smtpServer));
 
             resp = requested;
-            return DBUS_SUCCESS;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
         });
 
     smtpIface_primary->register_property(
@@ -213,7 +213,7 @@ void createDbus_Properties(
                                   static_cast<currentServer>(smtpServer));
 
             resp = requested;
-            return DBUS_SUCCESS;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
         });
 
     smtpIface_primary->register_property(
@@ -238,7 +238,7 @@ void createDbus_Properties(
                                   static_cast<currentServer>(smtpServer));
 
             resp = requested;
-            return DBUS_SUCCESS;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
         });
 }
 
