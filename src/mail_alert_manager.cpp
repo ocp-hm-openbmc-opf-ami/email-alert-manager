@@ -22,6 +22,7 @@ namespace manager
 {
 void monitor_cb(const char* buf, int buflen, int writing, void* arg)
 {
+    struct credentials* cread = (struct credentials*)arg;
 
     if (writing == SMTP_CB_HEADERS)
     {
@@ -38,9 +39,17 @@ void monitor_cb(const char* buf, int buflen, int writing, void* arg)
     }
     else
     {
+        std::string status = buf;
 #if (ENABLE_VERBOSE_DEBUG == 1)
-        std::cerr << "STAT: " << buf << std::endl;
+        std::cerr << "STAT: " << status <<std::endl;
 #endif
+        std::size_t credential_invalid = status.find(AUTH_1);
+        std::size_t client_auth = status.find(AUTH_2);
+        if((credential_invalid != std::string::npos) || 
+                            client_auth != std::string::npos)
+        {
+            cread->authError = -1;
+        } 
     }
 }
 
@@ -49,7 +58,7 @@ int authinteract(auth_client_request_t request, char** result, int fields,
 {
     struct credentials* cread = (struct credentials*)arg;
 
-    if ((!cread->username.empty()) || (!cread->password.empty()))
+    if ((cread->username.empty()) || (cread->password.empty()))
     {
         return 0;
     }
@@ -277,7 +286,7 @@ void print_recipient_status(smtp_recipient_t recipient, const char* mailbox,
 {
     const smtp_status_t* status;
     status = smtp_recipient_status(recipient);
-#if (ENABLE_VERBOSE_DEBUG == 0)
+#if (ENABLE_VERBOSE_DEBUG == 1)
     std::cerr << "Recipient Status: " << status->code << " " << status->text
               << std::endl;
 #endif
@@ -292,9 +301,13 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
 {
     smtpStatus ret_status = send_mail(subject, msg, curr_server);
 
-    if(ret_status != smtpStatus::SMTP_ERROR)
+    if(ret_status == smtpStatus::SMTP_AUTH_FAIL)
     {
-        log<level::INFO>("SMTP Mail sent.......\r\n");
+        return int(smtpStatus::SMTP_AUTH_FAIL);
+    }
+    else if(ret_status == smtpStatus::SMTP_SUCCESS)
+    {
+        log<level::INFO>("SMTP Mail sent\r\n");
     }
     else
     {
@@ -321,8 +334,6 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
     smtpStatus ret = smtpStatus::SMTP_SUCCESS;
 
     auth_client_init();
-
-    session = smtp_create_session();
 
     uint8_t cur_smtpCfg = int(server);
    
@@ -353,7 +364,7 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
         }
         message = smtp_add_message(session);
 
-        smtp_set_monitorcb(session, monitor_cb, stdout, 0);
+        smtp_set_monitorcb(session, monitor_cb, (void*)&credential, 0);
 
         if (!smtp_set_timeout(session, (int)Timeout_GREETING, 3))
         {
@@ -374,14 +385,14 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
                 }
             }   
             else
-            {   if ((!sec_server_cert.exists()) || (!sec_private_key.exists()) ||
+            {   
+                if ((!sec_server_cert.exists()) || (!sec_private_key.exists()) ||
                 (!sec_CA_cert.exists()))
                 {
                     log<level::ERR>("Please Provide Certificates \r\n");
                     return smtpStatus::SMTP_ERROR;
                 }
             }
-
             if (!(smtp_starttls_enable(session, Starttls_ENABLED)))
             {
                 log<level::ERR>("startTLS enable Failed \r\n");
@@ -410,27 +421,23 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
             {
                 log<level::ERR>("Cannot load key file \r\n");
             }
-
             /* Load certificate chain */
             if (SSL_CTX_use_certificate_chain_file(smtpcli_sslctx,
                                                    Cert_Certificate) != 1)
             {
                 log<level::ERR>("Cannot load certificate file \r\n");
             }
-
             /* Check private key validity */
             if (!SSL_CTX_check_private_key(smtpcli_sslctx))
             {
                 log<level::ERR>("Private Key is invalid \r\n");
             }
-
             /* Load trust file */
             if (SSL_CTX_load_verify_locations(smtpcli_sslctx, CA_Certificate,
                                               NULL) != 1)
             {
                 log<level::ERR>("Cannot load trust file \r\n");
             }
-
             /* If any of the above conditions failed, free the SSL_CTX and */
             if (!smtpcli_sslctx)
             {
@@ -453,7 +460,6 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
             smtp_set_header(message, "To", NULL, single_recipient.c_str());
             smtp_add_recipient(message, single_recipient.c_str());
         }
-
         sa.sa_handler = SIG_IGN;
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;
@@ -468,7 +474,6 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
                             "connection \r\n");
             return smtpStatus::SMTP_ERROR;
         }
-
         smtp_set_eventcb(session, event_cb, session);
 
         if (clientcfg[cur_smtpCfg].AuthEnable == true)
@@ -518,6 +523,15 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
         {
             status = smtp_message_transfer_status(message);
             smtp_enumerate_recipients(message, print_recipient_status, NULL);
+        }
+        if(credential.authError == 0xFF)
+        {
+            ret = smtpStatus::SMTP_AUTH_FAIL;
+            credential.authError = 0;
+        }
+        if(clientcfg[cur_smtpCfg].AuthEnable == true)
+        {
+            auth_destroy_context(authctx);
         }
     }
     else

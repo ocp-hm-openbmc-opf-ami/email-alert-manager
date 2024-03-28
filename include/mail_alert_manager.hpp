@@ -27,9 +27,13 @@
 #define ENABLE_VERBOSE_DEBUG (0)
 constexpr const uint8_t SMTP_TOTAL_SERVERS = 2;
 
+constexpr const std::string AUTH_1 {"535 5.7.8"};
+constexpr const std::string AUTH_2 {"501 5.7.0"};
+
 enum class smtpStatus : int16_t
 {
     SMTP_ERROR   = -1,
+    SMTP_AUTH_FAIL = -2,
     SMTP_SUCCESS = 0,
     DBUS_SUCCESS = 1,
 };
@@ -68,9 +72,9 @@ struct credentials
 {
     std::string username;
     std::string password;
+    uint8_t authError;
 };
 
-#pragma pack (1)
 struct mail_server
 {
     bool enable;
@@ -82,7 +86,6 @@ struct mail_server
     std::vector<std::string> recipient;
     struct credentials user_credntial;
 };
-#pragma pack (0)
 
 class smtp
 {
