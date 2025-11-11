@@ -275,6 +275,11 @@ int main()
             return objsmtp.sendmail(subject, msg);
         });
 
+    smtpIface->register_method(
+        "ForgotPassSendMail", [&](const std::string& toMailAddress,const std::string& subject, const std::string& msg) {
+            return objsmtp.forgotPassSendMail(toMailAddress,subject, msg);
+        });
+
     smtpIface_secondary->initialize();
     smtpIface_primary->initialize();
     smtpIface->initialize();

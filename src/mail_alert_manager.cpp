@@ -297,9 +297,9 @@ void smtp::init_smtp(void)
     session = smtp_create_session();
 }
 
-uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
+uint16_t smtp::forgotPassSendMail(const std::string& toMailAddress,const std::string& subject, const std::string& msg)
 {
-    smtpStatus ret_status = send_mail(subject, msg, curr_server);
+    smtpStatus ret_status = send_mail(subject, msg, curr_server,toMailAddress);
 
     if(ret_status == smtpStatus::SMTP_AUTH_FAIL)
     {
@@ -316,7 +316,7 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
         else
            curr_server = currentServer::SMTP_PRIMARY_SERVER;
 
-        if(send_mail(subject, msg, curr_server) == smtpStatus::SMTP_ERROR)
+        if(send_mail(subject, msg, curr_server,toMailAddress) == smtpStatus::SMTP_ERROR)
         {
             return int(smtpStatus::SMTP_ERROR);
         }
@@ -328,7 +328,40 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
     return static_cast<int>(ret_status);
 }
 
-smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, currentServer server)
+
+uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
+{
+    std::string toAddress;
+    smtpStatus ret_status = send_mail(subject, msg, curr_server,toAddress);
+
+    if(ret_status == smtpStatus::SMTP_AUTH_FAIL)
+    {
+        return int(smtpStatus::SMTP_AUTH_FAIL);
+    }
+    else if(ret_status == smtpStatus::SMTP_SUCCESS)
+    {
+        log<level::INFO>("SMTP Mail sent\r\n");
+    }
+    else
+    {
+        if(curr_server == currentServer::SMTP_PRIMARY_SERVER)
+           curr_server = currentServer::SMTP_SECONDARY_SERVER;
+        else
+           curr_server = currentServer::SMTP_PRIMARY_SERVER;
+
+        if(send_mail(subject, msg, curr_server,toAddress) == smtpStatus::SMTP_ERROR)
+        {
+            return int(smtpStatus::SMTP_ERROR);
+        }
+        else
+        {
+            return int(smtpStatus::SMTP_SUCCESS);
+        }
+    }
+    return static_cast<int>(ret_status);
+}
+
+smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, currentServer server,const std::string& toAddress)
 {
     char service[5] = {0};
     smtpStatus ret = smtpStatus::SMTP_SUCCESS;
@@ -454,12 +487,20 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
             log<level::INFO>("TLS is Disabled \r\n");
             smtp_starttls_enable(session, Starttls_DISABLED);
         }
-
+if(toAddress.empty())
+{
         for (const auto& single_recipient : clientcfg[cur_smtpCfg].recipient)
         {
             smtp_set_header(message, "To", NULL, single_recipient.c_str());
             smtp_add_recipient(message, single_recipient.c_str());
         }
+}
+else
+{
+            smtp_set_header(message, "To", NULL, toAddress.c_str());
+            smtp_add_recipient(message, toAddress.c_str());
+
+}
         sa.sa_handler = SIG_IGN;
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;
