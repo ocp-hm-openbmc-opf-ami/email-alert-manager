@@ -116,7 +116,8 @@ class smtp
     smtpStatus getSmtpConfig(struct mail_server& ms, currentServer server_select);
     uint16_t sendmail(const std::string& subject, const std::string& msg);
     smtpStatus initializeSmtpcfg(currentServer curr_server);
-    smtpStatus send_mail(const std::string& subject, const std::string& msg, currentServer server);
+    uint16_t forgotPassSendMail(const std::string& toMailAddress,const std::string& subject, const std::string& msg);
+    smtpStatus send_mail(const std::string& subject, const std::string& msg, currentServer server,const std::string& toAddress);
 };
 } // namespace manager
 } // namespace alert
