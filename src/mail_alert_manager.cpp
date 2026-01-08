@@ -2,17 +2,16 @@
 
 #include <arpa/inet.h>
 #include <assert.h>
+#include <netdb.h>
 #include <openssl/ssl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <syslog.h>
+
 #include <fstream>
 #include <iostream>
-
-#include <sys/socket.h>
-#include <netdb.h>
-#include <sys/types.h>
-
 
 namespace mail
 {
@@ -41,15 +40,15 @@ void monitor_cb(const char* buf, int buflen, int writing, void* arg)
     {
         std::string status = buf;
 #if (ENABLE_VERBOSE_DEBUG == 1)
-        std::cerr << "STAT: " << status <<std::endl;
+        std::cerr << "STAT: " << status << std::endl;
 #endif
         std::size_t credential_invalid = status.find(AUTH_1);
         std::size_t client_auth = status.find(AUTH_2);
-        if((credential_invalid != std::string::npos) || 
-                            client_auth != std::string::npos)
+        if ((credential_invalid != std::string::npos) ||
+            client_auth != std::string::npos)
         {
             cread->authError = -1;
-        } 
+        }
     }
 }
 
@@ -192,43 +191,50 @@ void event_cb(smtp_session_t session, int event_no, void* arg, ...)
     va_start(alist, arg);
     switch (event_no)
     {
-        case SMTP_EV_CONNECT: {
+        case SMTP_EV_CONNECT:
+        {
 #if (ENABLE_VERBOSE_DEBUG == 1)
             log<level::INFO>("SMTP_EV_CONNECT \r\n");
 #endif
             break;
         }
-        case SMTP_EV_MAILSTATUS: {
+        case SMTP_EV_MAILSTATUS:
+        {
 #if (ENABLE_VERBOSE_DEBUG == 1)
             log<level::INFO>("SMTP_EV_MAILSTATUS \r\n");
 #endif
             break;
         }
-        case SMTP_EV_RCPTSTATUS: {
+        case SMTP_EV_RCPTSTATUS:
+        {
 #if (ENABLE_VERBOSE_DEBUG == 1)
             log<level::INFO>("SMTP_EV_RCPTSTATUS \r\n");
 #endif
             break;
         }
-        case SMTP_EV_MESSAGEDATA: {
+        case SMTP_EV_MESSAGEDATA:
+        {
 #if (ENABLE_VERBOSE_DEBUG == 1)
             log<level::INFO>("SMTP_EV_MESSAGEDATA \r\n");
 #endif
             break;
         }
-        case SMTP_EV_MESSAGESENT: {
+        case SMTP_EV_MESSAGESENT:
+        {
 #if (ENABLE_VERBOSE_DEBUG == 1)
             log<level::INFO>("SMTP_EV_MESSAGESENT \r\n");
 #endif
             break;
         }
-        case SMTP_EV_DISCONNECT: {
+        case SMTP_EV_DISCONNECT:
+        {
 #if (ENABLE_VERBOSE_DEBUG == 1)
             log<level::INFO>("SMTP_EV_DISCONNECT \r\n");
 #endif
             break;
         }
-        case SMTP_EV_WEAK_CIPHER: {
+        case SMTP_EV_WEAK_CIPHER:
+        {
             int bits;
             bits = va_arg(alist, long);
             ok = va_arg(alist, int*);
@@ -241,14 +247,16 @@ void event_cb(smtp_session_t session, int event_no, void* arg, ...)
             log<level::INFO>("SMTP_EV_STARTTLS_OK - TLS started here. \r\n");
 #endif
             break;
-        case SMTP_EV_INVALID_PEER_CERTIFICATE: {
+        case SMTP_EV_INVALID_PEER_CERTIFICATE:
+        {
             long vfy_result;
             vfy_result = va_arg(alist, long);
             ok = va_arg(alist, int*);
             *ok = handle_invalid_peer_certificate(vfy_result);
             break;
         }
-        case SMTP_EV_NO_PEER_CERTIFICATE: {
+        case SMTP_EV_NO_PEER_CERTIFICATE:
+        {
             ok = va_arg(alist, int*);
 #if (ENABLE_VERBOSE_DEBUG == 1)
             log<level::INFO>("SMTP_EV_NO_PEER_CERTIFICATE - accepted. \r\n");
@@ -256,7 +264,8 @@ void event_cb(smtp_session_t session, int event_no, void* arg, ...)
             *ok = 1;
             break;
         }
-        case SMTP_EV_WRONG_PEER_CERTIFICATE: {
+        case SMTP_EV_WRONG_PEER_CERTIFICATE:
+        {
             ok = va_arg(alist, int*);
 #if (ENABLE_VERBOSE_DEBUG == 1)
             log<level::INFO>("SMTP_EV_WRONG_PEER_CERTIFICATE - accepted. \r\n");
@@ -264,7 +273,8 @@ void event_cb(smtp_session_t session, int event_no, void* arg, ...)
             *ok = 1;
             break;
         }
-        case SMTP_EV_NO_CLIENT_CERTIFICATE: {
+        case SMTP_EV_NO_CLIENT_CERTIFICATE:
+        {
             ok = va_arg(alist, int*);
 #if (ENABLE_VERBOSE_DEBUG == 1)
             log<level::INFO>("SMTP_EV_NO_CLIENT_CERTIFICATE - accepted. \r\n");
@@ -297,26 +307,29 @@ void smtp::init_smtp(void)
     session = smtp_create_session();
 }
 
-uint16_t smtp::forgotPassSendMail(const std::string& toMailAddress,const std::string& subject, const std::string& msg)
+uint16_t smtp::forgotPassSendMail(const std::string& toMailAddress,
+                                  const std::string& subject,
+                                  const std::string& msg)
 {
-    smtpStatus ret_status = send_mail(subject, msg, curr_server,toMailAddress);
+    smtpStatus ret_status = send_mail(subject, msg, curr_server, toMailAddress);
 
-    if(ret_status == smtpStatus::SMTP_AUTH_FAIL)
+    if (ret_status == smtpStatus::SMTP_AUTH_FAIL)
     {
         return int(smtpStatus::SMTP_AUTH_FAIL);
     }
-    else if(ret_status == smtpStatus::SMTP_SUCCESS)
+    else if (ret_status == smtpStatus::SMTP_SUCCESS)
     {
         log<level::INFO>("SMTP Mail sent\r\n");
     }
     else
     {
-        if(curr_server == currentServer::SMTP_PRIMARY_SERVER)
-           curr_server = currentServer::SMTP_SECONDARY_SERVER;
+        if (curr_server == currentServer::SMTP_PRIMARY_SERVER)
+            curr_server = currentServer::SMTP_SECONDARY_SERVER;
         else
-           curr_server = currentServer::SMTP_PRIMARY_SERVER;
+            curr_server = currentServer::SMTP_PRIMARY_SERVER;
 
-        if(send_mail(subject, msg, curr_server,toMailAddress) == smtpStatus::SMTP_ERROR)
+        if (send_mail(subject, msg, curr_server, toMailAddress) ==
+            smtpStatus::SMTP_ERROR)
         {
             return int(smtpStatus::SMTP_ERROR);
         }
@@ -327,29 +340,29 @@ uint16_t smtp::forgotPassSendMail(const std::string& toMailAddress,const std::st
     }
     return static_cast<int>(ret_status);
 }
-
 
 uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
 {
     std::string toAddress;
-    smtpStatus ret_status = send_mail(subject, msg, curr_server,toAddress);
+    smtpStatus ret_status = send_mail(subject, msg, curr_server, toAddress);
 
-    if(ret_status == smtpStatus::SMTP_AUTH_FAIL)
+    if (ret_status == smtpStatus::SMTP_AUTH_FAIL)
     {
         return int(smtpStatus::SMTP_AUTH_FAIL);
     }
-    else if(ret_status == smtpStatus::SMTP_SUCCESS)
+    else if (ret_status == smtpStatus::SMTP_SUCCESS)
     {
         log<level::INFO>("SMTP Mail sent\r\n");
     }
     else
     {
-        if(curr_server == currentServer::SMTP_PRIMARY_SERVER)
-           curr_server = currentServer::SMTP_SECONDARY_SERVER;
+        if (curr_server == currentServer::SMTP_PRIMARY_SERVER)
+            curr_server = currentServer::SMTP_SECONDARY_SERVER;
         else
-           curr_server = currentServer::SMTP_PRIMARY_SERVER;
+            curr_server = currentServer::SMTP_PRIMARY_SERVER;
 
-        if(send_mail(subject, msg, curr_server,toAddress) == smtpStatus::SMTP_ERROR)
+        if (send_mail(subject, msg, curr_server, toAddress) ==
+            smtpStatus::SMTP_ERROR)
         {
             return int(smtpStatus::SMTP_ERROR);
         }
@@ -361,7 +374,8 @@ uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
     return static_cast<int>(ret_status);
 }
 
-smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, currentServer server,const std::string& toAddress)
+smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
+                           currentServer server, const std::string& toAddress)
 {
     char service[5] = {0};
     smtpStatus ret = smtpStatus::SMTP_SUCCESS;
@@ -369,7 +383,7 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
     auth_client_init();
 
     uint8_t cur_smtpCfg = int(server);
-   
+
     if (clientcfg[cur_smtpCfg].enable == true)
     {
         if ((clientcfg[cur_smtpCfg].host.empty()) ||
@@ -393,7 +407,7 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
         }
         else
         {
-           log<level::INFO>("Authentication not enabled \r\n");
+            log<level::INFO>("Authentication not enabled \r\n");
         }
         message = smtp_add_message(session);
 
@@ -408,19 +422,19 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
         {
             log<level::INFO>("TLS is enabled \r\n");
 
-            if(cur_smtpCfg == 0)
+            if (cur_smtpCfg == 0)
             {
-                if ((!pri_server_cert.exists()) || (!pri_private_key.exists()) ||
-                    (!pri_CA_cert.exists()))
+                if ((!pri_server_cert.exists()) ||
+                    (!pri_private_key.exists()) || (!pri_CA_cert.exists()))
                 {
                     log<level::ERR>("Please Provide Certificates \r\n");
                     return smtpStatus::SMTP_ERROR;
                 }
-            }   
+            }
             else
-            {   
-                if ((!sec_server_cert.exists()) || (!sec_private_key.exists()) ||
-                (!sec_CA_cert.exists()))
+            {
+                if ((!sec_server_cert.exists()) ||
+                    (!sec_private_key.exists()) || (!sec_CA_cert.exists()))
                 {
                     log<level::ERR>("Please Provide Certificates \r\n");
                     return smtpStatus::SMTP_ERROR;
@@ -444,9 +458,9 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
                 return smtpStatus::SMTP_ERROR;
             }
 
-            const char *private_key_Cert = privatekeyPath[cur_smtpCfg];
-            const char *Cert_Certificate = certificatePath[cur_smtpCfg];
-            const char *CA_Certificate = CAcertificatePath[cur_smtpCfg];
+            const char* private_key_Cert = privatekeyPath[cur_smtpCfg];
+            const char* Cert_Certificate = certificatePath[cur_smtpCfg];
+            const char* CA_Certificate = CAcertificatePath[cur_smtpCfg];
 
             /* Load private key */
             if (SSL_CTX_use_PrivateKey_file(smtpcli_sslctx, private_key_Cert,
@@ -487,27 +501,27 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg, c
             log<level::INFO>("TLS is Disabled \r\n");
             smtp_starttls_enable(session, Starttls_DISABLED);
         }
-if(toAddress.empty())
-{
-        for (const auto& single_recipient : clientcfg[cur_smtpCfg].recipient)
+        if (toAddress.empty())
         {
-            smtp_set_header(message, "To", NULL, single_recipient.c_str());
-            smtp_add_recipient(message, single_recipient.c_str());
+            for (const auto& single_recipient :
+                 clientcfg[cur_smtpCfg].recipient)
+            {
+                smtp_set_header(message, "To", NULL, single_recipient.c_str());
+                smtp_add_recipient(message, single_recipient.c_str());
+            }
         }
-}
-else
-{
+        else
+        {
             smtp_set_header(message, "To", NULL, toAddress.c_str());
             smtp_add_recipient(message, toAddress.c_str());
-
-}
+        }
         sa.sa_handler = SIG_IGN;
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;
         sigaction(SIGPIPE, &sa, NULL);
 
         std::string smtpPort = clientcfg[cur_smtpCfg].host + "-" +
-                                std::to_string(clientcfg[cur_smtpCfg].port);
+                               std::to_string(clientcfg[cur_smtpCfg].port);
 
         if (smtp_set_server(session, (const char*)smtpPort.c_str()) == 0)
         {
@@ -557,20 +571,20 @@ else
         syslog(LOG_INFO, "Session Starting %d \r\n", cur_smtpCfg);
 
         if (!smtp_start_session(session))
-        {         
-            ret = smtpStatus::SMTP_ERROR;               
+        {
+            ret = smtpStatus::SMTP_ERROR;
         }
         else
         {
             status = smtp_message_transfer_status(message);
             smtp_enumerate_recipients(message, print_recipient_status, NULL);
         }
-        if(credential.authError == 0xFF)
+        if (credential.authError == 0xFF)
         {
             ret = smtpStatus::SMTP_AUTH_FAIL;
             credential.authError = 0;
         }
-        if(clientcfg[cur_smtpCfg].AuthEnable == true)
+        if (clientcfg[cur_smtpCfg].AuthEnable == true)
         {
             auth_destroy_context(authctx);
         }
@@ -587,7 +601,7 @@ else
 }
 
 smtpStatus smtp::setsmtpconfig(struct mail_server& servers,
-                             currentServer select_server)
+                               currentServer select_server)
 {
     std::ofstream configFile;
     if (select_server == currentServer::SMTP_PRIMARY_SERVER)
@@ -623,7 +637,7 @@ smtpStatus smtp::setsmtpconfig(struct mail_server& servers,
 }
 
 smtpStatus smtp::getSmtpConfig(struct mail_server& ms,
-                             currentServer server_select)
+                               currentServer server_select)
 {
     std::string configFilePath;
 

@@ -8,9 +8,10 @@
 #include "mail_alert_manager.hpp"
 
 #include <boost/asio/io_service.hpp>
-#include <iostream>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/message.hpp>
+
+#include <iostream>
 
 static constexpr const char* smtpclient = "xyz.openbmc_project.mail";
 static constexpr const char* smtpObj = "/xyz/openbmc_project/mail/alert";
@@ -244,7 +245,6 @@ void createDbus_Properties(
 
 int main()
 {
-
     boost::asio::io_service io;
     auto conn = std::make_shared<sdbusplus::asio::connection>(io);
     conn->request_name(smtpclient);
@@ -276,8 +276,10 @@ int main()
         });
 
     smtpIface->register_method(
-        "ForgotPassSendMail", [&](const std::string& toMailAddress,const std::string& subject, const std::string& msg) {
-            return objsmtp.forgotPassSendMail(toMailAddress,subject, msg);
+        "ForgotPassSendMail",
+        [&](const std::string& toMailAddress, const std::string& subject,
+            const std::string& msg) {
+            return objsmtp.forgotPassSendMail(toMailAddress, subject, msg);
         });
 
     smtpIface_secondary->initialize();

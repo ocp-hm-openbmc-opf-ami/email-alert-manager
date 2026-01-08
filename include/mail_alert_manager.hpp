@@ -20,19 +20,20 @@
 
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/log.hpp>
-#include <vector>
 #include <xyz/openbmc_project/Common/error.hpp>
 #include <xyz/openbmc_project/Logging/SEL/error.hpp>
+
+#include <vector>
 
 #define ENABLE_VERBOSE_DEBUG (0)
 constexpr const uint8_t SMTP_TOTAL_SERVERS = 2;
 
-constexpr const std::string AUTH_1 {"535 5.7.8"};
-constexpr const std::string AUTH_2 {"501 5.7.0"};
+constexpr const std::string AUTH_1{"535 5.7.8"};
+constexpr const std::string AUTH_2{"501 5.7.0"};
 
 enum class smtpStatus : int16_t
 {
-    SMTP_ERROR   = -1,
+    SMTP_ERROR = -1,
     SMTP_AUTH_FAIL = -2,
     SMTP_SUCCESS = 0,
     DBUS_SUCCESS = 1,
@@ -42,17 +43,17 @@ constexpr const char* primaryconfigFilePath =
     "/var/lib/alert/primary_smtp_config.json";
 constexpr const char* secondaryconfigFilePath =
     "/var/lib/alert/secondary_smtp_config.json";
-constexpr const char* certificatePath[SMTP_TOTAL_SERVERS] = 
-    {"/etc/ssl/certs/primary_server.crt", "/etc/ssl/certs/secondary_server.crt"};
-constexpr const char* privatekeyPath[SMTP_TOTAL_SERVERS] = 
-    {"/etc/ssl/private/primary_server.key" , "/etc/ssl/private/secondary_server.key"};
-constexpr const char* CAcertificatePath[SMTP_TOTAL_SERVERS] = 
-    {"/etc/ssl/certs/primary_cacert.pem" , "/etc/ssl/certs/secondary_cacert.pem"};
+constexpr const char* certificatePath[SMTP_TOTAL_SERVERS] = {
+    "/etc/ssl/certs/primary_server.crt", "/etc/ssl/certs/secondary_server.crt"};
+constexpr const char* privatekeyPath[SMTP_TOTAL_SERVERS] = {
+    "/etc/ssl/private/primary_server.key",
+    "/etc/ssl/private/secondary_server.key"};
+constexpr const char* CAcertificatePath[SMTP_TOTAL_SERVERS] = {
+    "/etc/ssl/certs/primary_cacert.pem", "/etc/ssl/certs/secondary_cacert.pem"};
 
 using ::phosphor::logging::entry;
 using ::phosphor::logging::level;
 using ::phosphor::logging::log;
-
 
 enum class currentServer
 {
@@ -89,7 +90,6 @@ struct mail_server
 
 class smtp
 {
-
   public:
     smtp_session_t session;
     smtp_message_t message;
@@ -112,12 +112,16 @@ class smtp
 
     void init_smtp(void);
     smtpStatus setsmtpconfig(struct mail_server& servers,
-                           currentServer select_server);
-    smtpStatus getSmtpConfig(struct mail_server& ms, currentServer server_select);
+                             currentServer select_server);
+    smtpStatus getSmtpConfig(struct mail_server& ms,
+                             currentServer server_select);
     uint16_t sendmail(const std::string& subject, const std::string& msg);
     smtpStatus initializeSmtpcfg(currentServer curr_server);
-    uint16_t forgotPassSendMail(const std::string& toMailAddress,const std::string& subject, const std::string& msg);
-    smtpStatus send_mail(const std::string& subject, const std::string& msg, currentServer server,const std::string& toAddress);
+    uint16_t forgotPassSendMail(const std::string& toMailAddress,
+                                const std::string& subject,
+                                const std::string& msg);
+    smtpStatus send_mail(const std::string& subject, const std::string& msg,
+                         currentServer server, const std::string& toAddress);
 };
 } // namespace manager
 } // namespace alert
