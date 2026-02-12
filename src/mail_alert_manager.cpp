@@ -311,27 +311,29 @@ uint16_t smtp::forgotPassSendMail(const std::string& toMailAddress,
                                   const std::string& subject,
                                   const std::string& msg)
 {
+    curr_server = currentServer::SMTP_PRIMARY_SERVER;
     smtpStatus ret_status = send_mail(subject, msg, curr_server, toMailAddress);
 
-    if (ret_status == smtpStatus::SMTP_AUTH_FAIL)
-    {
-        return int(smtpStatus::SMTP_AUTH_FAIL);
-    }
-    else if (ret_status == smtpStatus::SMTP_SUCCESS)
+    if (ret_status == smtpStatus::SMTP_SUCCESS)
     {
         log<level::INFO>("SMTP Mail sent\r\n");
     }
     else
     {
-        if (curr_server == currentServer::SMTP_PRIMARY_SERVER)
-            curr_server = currentServer::SMTP_SECONDARY_SERVER;
-        else
-            curr_server = currentServer::SMTP_PRIMARY_SERVER;
+        if (ret_status == smtpStatus::SMTP_AUTH_FAIL)
+            log<level::INFO>("Server switch due to SMTP_AUTH_FAIL\r\n");
 
-        if (send_mail(subject, msg, curr_server, toMailAddress) ==
-            smtpStatus::SMTP_ERROR)
+        curr_server = currentServer::SMTP_SECONDARY_SERVER;
+
+        ret_status = send_mail(subject, msg, curr_server, toMailAddress);
+
+        if (ret_status == smtpStatus::SMTP_ERROR)
         {
             return int(smtpStatus::SMTP_ERROR);
+        }
+        else if (ret_status == smtpStatus::SMTP_AUTH_FAIL)
+        {
+            return int(smtpStatus::SMTP_AUTH_FAIL);
         }
         else
         {
@@ -344,27 +346,29 @@ uint16_t smtp::forgotPassSendMail(const std::string& toMailAddress,
 uint16_t smtp::sendmail(const std::string& subject, const std::string& msg)
 {
     std::string toAddress;
+    curr_server = currentServer::SMTP_PRIMARY_SERVER;
     smtpStatus ret_status = send_mail(subject, msg, curr_server, toAddress);
 
-    if (ret_status == smtpStatus::SMTP_AUTH_FAIL)
-    {
-        return int(smtpStatus::SMTP_AUTH_FAIL);
-    }
-    else if (ret_status == smtpStatus::SMTP_SUCCESS)
+    if (ret_status == smtpStatus::SMTP_SUCCESS)
     {
         log<level::INFO>("SMTP Mail sent\r\n");
     }
     else
     {
-        if (curr_server == currentServer::SMTP_PRIMARY_SERVER)
-            curr_server = currentServer::SMTP_SECONDARY_SERVER;
-        else
-            curr_server = currentServer::SMTP_PRIMARY_SERVER;
+        if (ret_status == smtpStatus::SMTP_AUTH_FAIL)
+            log<level::INFO>("Server switch due to SMTP_AUTH_FAIL\r\n");
 
-        if (send_mail(subject, msg, curr_server, toAddress) ==
-            smtpStatus::SMTP_ERROR)
+        curr_server = currentServer::SMTP_SECONDARY_SERVER;
+
+        ret_status = send_mail(subject, msg, curr_server, toAddress);
+
+        if (ret_status == smtpStatus::SMTP_ERROR)
         {
             return int(smtpStatus::SMTP_ERROR);
+        }
+        else if (ret_status == smtpStatus::SMTP_AUTH_FAIL)
+        {
+            return int(smtpStatus::SMTP_AUTH_FAIL);
         }
         else
         {
@@ -380,7 +384,11 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
     char service[5] = {0};
     smtpStatus ret = smtpStatus::SMTP_SUCCESS;
 
-    auth_client_init();
+    if (session != NULL)
+    {
+        smtp_destroy_session(session);
+    }
+    session = smtp_create_session();
 
     uint8_t cur_smtpCfg = int(server);
 
@@ -533,6 +541,7 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
 
         if (clientcfg[cur_smtpCfg].AuthEnable == true)
         {
+            auth_client_init();
             authctx = auth_create_context();
             if (authctx != NULL)
             {
@@ -587,6 +596,7 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
         if (clientcfg[cur_smtpCfg].AuthEnable == true)
         {
             auth_destroy_context(authctx);
+            auth_client_exit();
         }
     }
     else
@@ -595,7 +605,6 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
             "Please make Enable property to true to send the mail \r\n");
         return smtpStatus::SMTP_ERROR;
     }
-    auth_client_exit();
 
     return ret;
 }
