@@ -9,8 +9,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <libesmtp.h>
+/* smtp_starttls_set_ctx() in libesmtp.h is conditionally declared only when
+ * SSL_SESSION_ASN1_VERSION is defined (from <openssl/ssl.h>). Therefore,
+ * <openssl/ssl.h> must always be included before <libesmtp.h>.
+ */
+// clang-format off
 #include <openssl/ssl.h>
+#include <libesmtp.h>
+// clang-format on
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -102,13 +108,13 @@ class smtp
     const smtp_status_t* status;
     uint8_t cur_smtpCfg = 0;
 
-    std::filesystem::directory_entry pri_server_cert{certificatePath[0]};
-    std::filesystem::directory_entry pri_private_key{privatekeyPath[0]};
-    std::filesystem::directory_entry pri_CA_cert{CAcertificatePath[0]};
+    std::string pri_server_cert_path = certificatePath[0];
+    std::string pri_private_key_path = privatekeyPath[0];
+    std::string pri_CA_cert_path = CAcertificatePath[0];
 
-    std::filesystem::directory_entry sec_server_cert{certificatePath[1]};
-    std::filesystem::directory_entry sec_private_key{privatekeyPath[1]};
-    std::filesystem::directory_entry sec_CA_cert{CAcertificatePath[1]};
+    std::string sec_server_cert_path = certificatePath[1];
+    std::string sec_private_key_path = privatekeyPath[1];
+    std::string sec_CA_cert_path = CAcertificatePath[1];
 
     void init_smtp(void);
     smtpStatus setsmtpconfig(struct mail_server& servers,

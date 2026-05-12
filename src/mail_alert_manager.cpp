@@ -432,8 +432,9 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
 
             if (cur_smtpCfg == 0)
             {
-                if ((!pri_server_cert.exists()) ||
-                    (!pri_private_key.exists()) || (!pri_CA_cert.exists()))
+                if ((!std::filesystem::exists(pri_server_cert_path)) ||
+                    (!std::filesystem::exists(pri_private_key_path)) ||
+                    (!std::filesystem::exists(pri_CA_cert_path)))
                 {
                     log<level::ERR>("Please Provide Certificates \r\n");
                     return smtpStatus::SMTP_ERROR;
@@ -441,16 +442,13 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
             }
             else
             {
-                if ((!sec_server_cert.exists()) ||
-                    (!sec_private_key.exists()) || (!sec_CA_cert.exists()))
+                if ((!std::filesystem::exists(sec_server_cert_path)) ||
+                    (!std::filesystem::exists(sec_private_key_path)) ||
+                    (!std::filesystem::exists(sec_CA_cert_path)))
                 {
                     log<level::ERR>("Please Provide Certificates \r\n");
                     return smtpStatus::SMTP_ERROR;
                 }
-            }
-            if (!(smtp_starttls_enable(session, Starttls_ENABLED)))
-            {
-                log<level::ERR>("startTLS enable Failed \r\n");
             }
             if (!(smtp_starttls_enable(session, Starttls_REQUIRED)))
             {
@@ -469,6 +467,9 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
             const char* private_key_Cert = privatekeyPath[cur_smtpCfg];
             const char* Cert_Certificate = certificatePath[cur_smtpCfg];
             const char* CA_Certificate = CAcertificatePath[cur_smtpCfg];
+
+            SSL_CTX_set_min_proto_version(smtpcli_sslctx, TLS1_2_VERSION);
+            SSL_CTX_set_max_proto_version(smtpcli_sslctx, TLS1_2_VERSION);
 
             /* Load private key */
             if (SSL_CTX_use_PrivateKey_file(smtpcli_sslctx, private_key_Cert,
@@ -502,6 +503,13 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
             }
             SSL_CTX_set_verify(smtpcli_sslctx, SSL_VERIFY_PEER, NULL);
             SSL_CTX_set_verify_depth(smtpcli_sslctx, 4);
+            if (!smtp_starttls_set_ctx(session, smtpcli_sslctx))
+            {
+                SSL_CTX_free(smtpcli_sslctx);
+                SSL_CTX_free(smtpcli_sslctx);
+                log<level::INFO>("startTLS set context Failed\r\n");
+                return smtpStatus::SMTP_ERROR;
+            }
             SSL_CTX_free(smtpcli_sslctx);
         }
         else
