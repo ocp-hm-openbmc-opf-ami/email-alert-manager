@@ -76,6 +76,29 @@ int authinteract(auth_client_request_t request, char** result, int fields,
     return 1;
 }
 
+int oauth2_authinteract(auth_client_request_t request, char** result,
+                        int fields, void* arg)
+{
+    struct credentials* cread = (struct credentials*)arg;
+    if (cread->username.empty() || cread->oauth2_token.access_token.empty())
+    {
+        log<level::ERR>("OAuth2 username or access token is empty\r\n");
+        return 0;
+    }
+    for (int i = 0; i < fields; i++)
+    {
+        if (request[i].flags & AUTH_USER)
+        {
+            result[i] = (char*)cread->username.c_str();
+        }
+        else if (request[i].flags & AUTH_PASS)
+        {
+            result[i] = (char*)cread->oauth2_token.access_token.c_str();
+        }
+    }
+    return 1;
+}
+
 int tlsinteract(char* buf, int buflen, int rwflag, void* arg)
 {
     char* pw;
@@ -406,11 +429,15 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
 
         if (clientcfg[cur_smtpCfg].AuthEnable == true)
         {
-            if ((credential.username.empty()) || (credential.password.empty()))
+            if (clientcfg[cur_smtpCfg].OAuthEnable == false)
             {
-                log<level::ERR>(
-                    "Authentication: username/password is empty \r\n");
-                return smtpStatus::SMTP_ERROR;
+                if ((credential.username.empty()) ||
+                    (credential.password.empty()))
+                {
+                    log<level::ERR>(
+                        "Authentication: username/password is empty \r\n");
+                    return smtpStatus::SMTP_ERROR;
+                }
             }
         }
         else
@@ -553,11 +580,23 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
             authctx = auth_create_context();
             if (authctx != NULL)
             {
-                auth_set_mechanism_flags(authctx, AUTH_PLUGIN_PLAIN, 0);
-                auth_set_interact_cb(authctx, authinteract, (void*)&credential);
+                if (clientcfg[cur_smtpCfg].OAuthEnable == true)
+                {
+                    auth_set_mechanism_flags(authctx, AUTH_PLUGIN_XOAUTH2, 0);
+                    auth_set_interact_cb(authctx, oauth2_authinteract,
+                                         (void*)&credential);
+                    log<level::INFO>("OAuth2 Auth Context Set\r\n");
+                }
+                else
+                {
+                    auth_set_mechanism_flags(authctx, AUTH_PLUGIN_PLAIN, 0);
+                    auth_set_interact_cb(authctx, authinteract,
+                                         (void*)&credential);
+                    log<level::INFO>("Plain Auth Context Set\r\n");
+                }
                 smtp_auth_set_context(session, authctx);
+                log<level::INFO>("Auth Enabled\r\n");
             }
-            log<level::INFO>("Auth Enabled\r\n");
         }
         else
         {
@@ -639,8 +678,10 @@ smtpStatus smtp::setsmtpconfig(struct mail_server& servers,
     privData["Recipient"] = servers.recipient;
     privData["TLSEnable"] = servers.TLSEnable;
     privData["Authentication"] = servers.AuthEnable;
+    privData["Oauth"] = servers.OAuthEnable;
     privData["username"] = servers.user_credntial.username;
     privData["password"] = servers.user_credntial.password;
+    privData["accesstoken"] = servers.user_credntial.oauth2_token.access_token;
     jsonData["Config"] = privData;
 
     const auto& writeData = jsonData.dump(4);
@@ -684,8 +725,10 @@ smtpStatus smtp::getSmtpConfig(struct mail_server& ms,
         ms.recipient = smtpConfig["Recipient"];
         ms.TLSEnable = smtpConfig["TLSEnable"].get<bool>();
         ms.AuthEnable = smtpConfig["Authentication"].get<bool>();
+        ms.OAuthEnable = smtpConfig["Oauth"].get<bool>();
         ms.user_credntial.username = smtpConfig["username"];
         ms.user_credntial.password = smtpConfig["password"];
+        ms.user_credntial.oauth2_token.access_token = smtpConfig["accesstoken"];
 
         if ((ms.user_credntial.username.empty()) ||
             (ms.user_credntial.username.empty()))
@@ -744,8 +787,11 @@ smtpStatus smtp::initializeSmtpcfg(currentServer curr_server)
         clientcfg[cur_smtpCfg].TLSEnable = smtpConfig["TLSEnable"].get<bool>();
         clientcfg[cur_smtpCfg].AuthEnable =
             smtpConfig["Authentication"].get<bool>();
+        clientcfg[cur_smtpCfg].OAuthEnable = smtpConfig["Oauth"].get<bool>();
         clientcfg[cur_smtpCfg].user_credntial.username = smtpConfig["username"];
         clientcfg[cur_smtpCfg].user_credntial.password = smtpConfig["password"];
+        clientcfg[cur_smtpCfg].user_credntial.oauth2_token.access_token =
+            smtpConfig["accesstoken"];
 
         if ((!clientcfg[cur_smtpCfg].user_credntial.username.empty()) ||
             (!clientcfg[cur_smtpCfg].user_credntial.password.empty()))

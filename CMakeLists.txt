@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 project(mail-alert-manager CXX)
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -19,6 +19,9 @@ set(SRC_FILES src/mail_alert_manager_main.cpp src/mail_alert_manager.cpp)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SYSTEMD libsystemd REQUIRED)
 
+find_package(OpenSSL REQUIRED)
+pkg_check_modules(CRYPT libcrypto REQUIRED)
+
 # import sdbusplus
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SDBUSPLUSPLUS sdbusplus REQUIRED)
@@ -32,7 +35,7 @@ target_link_libraries(mail-alert-manager sdbusplus -lstdc++fs)
 target_link_libraries(mail-alert-manager esmtp)
 target_link_libraries(mail-alert-manager ssl)
 target_link_libraries(mail-alert-manager ${Boost_LIBRARIES})
-
+target_link_libraries(mail-alert-manager OpenSSL::Crypto  OpenSSL::SSL)
 link_directories(${EXTERNAL_INSTALL_LOCATION}/lib)
 
 set(SERVICE_FILES

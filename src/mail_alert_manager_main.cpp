@@ -7,7 +7,7 @@
 
 #include "mail_alert_manager.hpp"
 
-#include <boost/asio/io_service.hpp>
+//#include <boost/asio/io_service.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/message.hpp>
 
@@ -146,6 +146,30 @@ void createDbus_Properties(
             resp = requested;
             return static_cast<int>(smtpStatus::DBUS_SUCCESS);
         });
+    smtpIface_primary->register_property(
+        "accesstoken",
+        smtpClientcfg[cur_smtpCfg].user_credntial.oauth2_token.access_token,
+        [&](const std::string& requested, std::string& resp) {
+            int smtpServer = 0;
+            if (smtpIface_primary->get_interface_name() ==
+                smtp_Intf_primary_server)
+            {
+                smtpServer =
+                    static_cast<int>(currentServer::SMTP_PRIMARY_SERVER);
+            }
+            else
+            {
+                smtpServer =
+                    static_cast<int>(currentServer::SMTP_SECONDARY_SERVER);
+            }
+
+            smtpClientcfg[smtpServer].user_credntial.oauth2_token.access_token =
+                requested;
+            objsmtp.setsmtpconfig(smtpClientcfg[smtpServer],
+                                  static_cast<currentServer>(smtpServer));
+            resp = requested;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
+        });
 
     smtpIface_primary->register_property(
         "Enable", smtpClientcfg[cur_smtpCfg].enable,
@@ -187,6 +211,30 @@ void createDbus_Properties(
             }
 
             smtpClientcfg[smtpServer].AuthEnable = requested;
+            objsmtp.setsmtpconfig(smtpClientcfg[smtpServer],
+                                  static_cast<currentServer>(smtpServer));
+
+            resp = requested;
+            return static_cast<int>(smtpStatus::DBUS_SUCCESS);
+        });
+
+    smtpIface_primary->register_property(
+        "Oauth", smtpClientcfg[cur_smtpCfg].OAuthEnable,
+        [&](const bool& requested, bool& resp) {
+            uint8_t smtpServer = 0;
+            if (smtpIface_primary->get_interface_name() ==
+                smtp_Intf_primary_server)
+            {
+                smtpServer =
+                    static_cast<int>(currentServer::SMTP_PRIMARY_SERVER);
+            }
+            else
+            {
+                smtpServer =
+                    static_cast<int>(currentServer::SMTP_SECONDARY_SERVER);
+            }
+
+            smtpClientcfg[smtpServer].OAuthEnable = requested;
             objsmtp.setsmtpconfig(smtpClientcfg[smtpServer],
                                   static_cast<currentServer>(smtpServer));
 
@@ -245,7 +293,7 @@ void createDbus_Properties(
 
 int main()
 {
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto conn = std::make_shared<sdbusplus::asio::connection>(io);
     conn->request_name(smtpclient);
 

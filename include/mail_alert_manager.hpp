@@ -75,10 +75,17 @@ namespace manager
 {
 using Json = nlohmann::json;
 
+struct OAuth2Token
+{
+    std::string access_token;
+    std::string token_type = "Bearer";
+};
+
 struct credentials
 {
     std::string username;
     std::string password;
+    OAuth2Token oauth2_token;
     uint8_t authError;
 };
 
@@ -86,6 +93,7 @@ struct mail_server
 {
     bool enable;
     bool AuthEnable;
+    bool OAuthEnable;
     bool TLSEnable;
     uint16_t port;
     std::string host;
