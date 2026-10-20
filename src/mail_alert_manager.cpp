@@ -456,88 +456,138 @@ smtpStatus smtp::send_mail(const std::string& subject, const std::string& msg,
         if (clientcfg[cur_smtpCfg].TLSEnable == true)
         {
             log<level::INFO>("TLS is enabled \r\n");
-
-            if (cur_smtpCfg == 0)
+            if (clientcfg[cur_smtpCfg].OAuthEnable == false)
             {
-                if ((!std::filesystem::exists(pri_server_cert_path)) ||
-                    (!std::filesystem::exists(pri_private_key_path)) ||
-                    (!std::filesystem::exists(pri_CA_cert_path)))
+                if (cur_smtpCfg == 0)
                 {
-                    log<level::ERR>("Please Provide Certificates \r\n");
+                    if ((!std::filesystem::exists(pri_server_cert_path)) ||
+                        (!std::filesystem::exists(pri_private_key_path)) ||
+                        (!std::filesystem::exists(pri_CA_cert_path)))
+                    {
+                        log<level::ERR>("Please Provide Certificates \r\n");
+                        return smtpStatus::SMTP_ERROR;
+                    }
+                }
+                else
+                {
+                    if ((!std::filesystem::exists(sec_server_cert_path)) ||
+                        (!std::filesystem::exists(sec_private_key_path)) ||
+                        (!std::filesystem::exists(sec_CA_cert_path)))
+                    {
+                        log<level::ERR>("Please Provide Certificates \r\n");
+                        return smtpStatus::SMTP_ERROR;
+                    }
+                }
+                if (!(smtp_starttls_enable(session, Starttls_REQUIRED)))
+                {
+                    log<level::ERR>("startTLS Required Failed\r\n");
+                }
+
+                SSL_CTX* smtpcli_sslctx = NULL;
+                smtpcli_sslctx = SSL_CTX_new(SSLv23_method());
+
+                if (!smtpcli_sslctx)
+                {
+                    log<level::ERR>("Error creating SSL context\r\n");
                     return smtpStatus::SMTP_ERROR;
                 }
+
+                const char* private_key_Cert = privatekeyPath[cur_smtpCfg];
+                const char* Cert_Certificate = certificatePath[cur_smtpCfg];
+                const char* CA_Certificate = CAcertificatePath[cur_smtpCfg];
+
+                SSL_CTX_set_min_proto_version(smtpcli_sslctx, TLS1_2_VERSION);
+                SSL_CTX_set_max_proto_version(smtpcli_sslctx, TLS1_2_VERSION);
+
+                /* Load private key */
+                if (SSL_CTX_use_PrivateKey_file(
+                        smtpcli_sslctx, private_key_Cert, SSL_FILETYPE_PEM) !=
+                    1)
+                {
+                    log<level::ERR>("Cannot load key file \r\n");
+                }
+                /* Load certificate chain */
+                if (SSL_CTX_use_certificate_chain_file(smtpcli_sslctx,
+                                                       Cert_Certificate) != 1)
+                {
+                    log<level::ERR>("Cannot load certificate file \r\n");
+                }
+                /* Check private key validity */
+                if (!SSL_CTX_check_private_key(smtpcli_sslctx))
+                {
+                    log<level::ERR>("Private Key is invalid \r\n");
+                }
+                /* Load trust file */
+                if (SSL_CTX_load_verify_locations(smtpcli_sslctx,
+                                                  CA_Certificate, NULL) != 1)
+                {
+                    log<level::ERR>("Cannot load trust file \r\n");
+                }
+                /* If any of the above conditions failed, free the SSL_CTX and
+                 */
+                if (!smtpcli_sslctx)
+                {
+                    SSL_CTX_free(smtpcli_sslctx);
+                    smtpcli_sslctx = NULL;
+                    return smtpStatus::SMTP_ERROR;
+                }
+                SSL_CTX_set_verify(smtpcli_sslctx, SSL_VERIFY_PEER, NULL);
+                SSL_CTX_set_verify_depth(smtpcli_sslctx, 4);
+                if (!smtp_starttls_set_ctx(session, smtpcli_sslctx))
+                {
+                    SSL_CTX_free(smtpcli_sslctx);
+                    log<level::INFO>("startTLS set context Failed\r\n");
+                    return smtpStatus::SMTP_ERROR;
+                }
+                SSL_CTX_free(smtpcli_sslctx);
             }
             else
             {
-                if ((!std::filesystem::exists(sec_server_cert_path)) ||
-                    (!std::filesystem::exists(sec_private_key_path)) ||
-                    (!std::filesystem::exists(sec_CA_cert_path)))
+                log<level::INFO>(
+                    "OAuth2: Using STARTTLS without client certificates\r\n");
+                if (!(smtp_starttls_enable(session, Starttls_REQUIRED)))
                 {
-                    log<level::ERR>("Please Provide Certificates \r\n");
+                    log<level::ERR>("startTLS Required Failed\r\n");
+                }
+
+                /* Provide our own SSL_CTX: leaving it unset makes libesmtp
+                 * reuse its internal cached default context, which it frees on
+                 * every smtp_destroy_session() without clearing the cache
+                 * (use-after-free on the next send_mail() call). */
+                SSL_CTX* smtpcli_sslctx = SSL_CTX_new(SSLv23_method());
+
+                if (!smtpcli_sslctx)
+                {
+                    log<level::ERR>("Error creating SSL context\r\n");
                     return smtpStatus::SMTP_ERROR;
                 }
-            }
-            if (!(smtp_starttls_enable(session, Starttls_REQUIRED)))
-            {
-                log<level::ERR>("startTLS Required Failed\r\n");
-            }
+                /* Validate the server's certificate before sending the OAuth2
+                 * bearer token over the connection. Without this, OpenSSL
+                 * defaults to SSL_VERIFY_NONE and any certificate (self-signed,
+                 * expired, wrong CN) would be accepted — enabling MITM token
+                 * theft. */
+                SSL_CTX_set_verify(smtpcli_sslctx, SSL_VERIFY_PEER, NULL);
 
-            SSL_CTX* smtpcli_sslctx = NULL;
-            smtpcli_sslctx = SSL_CTX_new(SSLv23_method());
+                /* Load the system/CA trust store even though we are not using
+                 * client certificates. */
+                if (SSL_CTX_set_default_verify_paths(smtpcli_sslctx) != 1)
+                {
+                    log<level::ERR>(
+                        "Failed to load default CA verify paths\r\n");
+                    SSL_CTX_free(smtpcli_sslctx);
+                    return smtpStatus::SMTP_ERROR;
+                }
 
-            if (!smtpcli_sslctx)
-            {
-                log<level::ERR>("Error creating SSL context\r\n");
-                return smtpStatus::SMTP_ERROR;
-            }
-
-            const char* private_key_Cert = privatekeyPath[cur_smtpCfg];
-            const char* Cert_Certificate = certificatePath[cur_smtpCfg];
-            const char* CA_Certificate = CAcertificatePath[cur_smtpCfg];
-
-            SSL_CTX_set_min_proto_version(smtpcli_sslctx, TLS1_2_VERSION);
-            SSL_CTX_set_max_proto_version(smtpcli_sslctx, TLS1_2_VERSION);
-
-            /* Load private key */
-            if (SSL_CTX_use_PrivateKey_file(smtpcli_sslctx, private_key_Cert,
-                                            SSL_FILETYPE_PEM) != 1)
-            {
-                log<level::ERR>("Cannot load key file \r\n");
-            }
-            /* Load certificate chain */
-            if (SSL_CTX_use_certificate_chain_file(smtpcli_sslctx,
-                                                   Cert_Certificate) != 1)
-            {
-                log<level::ERR>("Cannot load certificate file \r\n");
-            }
-            /* Check private key validity */
-            if (!SSL_CTX_check_private_key(smtpcli_sslctx))
-            {
-                log<level::ERR>("Private Key is invalid \r\n");
-            }
-            /* Load trust file */
-            if (SSL_CTX_load_verify_locations(smtpcli_sslctx, CA_Certificate,
-                                              NULL) != 1)
-            {
-                log<level::ERR>("Cannot load trust file \r\n");
-            }
-            /* If any of the above conditions failed, free the SSL_CTX and */
-            if (!smtpcli_sslctx)
-            {
+                if (!smtp_starttls_set_ctx(session, smtpcli_sslctx))
+                {
+                    SSL_CTX_free(smtpcli_sslctx);
+                    log<level::INFO>("startTLS set context Failed\r\n");
+                    return smtpStatus::SMTP_ERROR;
+                }
+                /* smtp_starttls_set_ctx() up-refs ctx internally (libesmtp
+                 * smtp-tls.c), so this only releases our local reference. */
                 SSL_CTX_free(smtpcli_sslctx);
-                smtpcli_sslctx = NULL;
-                return smtpStatus::SMTP_ERROR;
             }
-            SSL_CTX_set_verify(smtpcli_sslctx, SSL_VERIFY_PEER, NULL);
-            SSL_CTX_set_verify_depth(smtpcli_sslctx, 4);
-            if (!smtp_starttls_set_ctx(session, smtpcli_sslctx))
-            {
-                SSL_CTX_free(smtpcli_sslctx);
-                SSL_CTX_free(smtpcli_sslctx);
-                log<level::INFO>("startTLS set context Failed\r\n");
-                return smtpStatus::SMTP_ERROR;
-            }
-            SSL_CTX_free(smtpcli_sslctx);
         }
         else
         {
